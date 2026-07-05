@@ -23,7 +23,10 @@ Security is enforced at the kernel boundary. Termos stores all configuration pro
 Deploying Termos globally is handled by a single automated installer. Running the script builds the optimized binary and configures shell completions for your active terminal environment. 
 
 ```bash
-chmod +x install.sh
+# Install directly from GitHub
+curl -fsSL https://raw.githubusercontent.com/engnhn/termos/main/install.sh | bash
+
+# Or install locally from source
 ./install.sh
 ```
 
