@@ -22,6 +22,9 @@ enum Commands {
     Connect {
         /// Nickname of the server to connect to
         nickname: String,
+        /// Optional quick command name to run immediately instead of interactive shell
+        #[arg(long, short = 'q')]
+        qc: Option<String>,
     },
     /// List all registered servers
     List,
@@ -119,18 +122,40 @@ fn main() {
                 }
             }
         }
-        Commands::Connect { nickname } => {
+        Commands::Connect { nickname, qc } => {
             match get_connection(&nickname) {
                 Ok(Some(conn)) => {
-                    if let Err(e) = ssh::execute_ssh(&conn) {
-                        eprintln!("\x1b[1;31mConnection Failed:\x1b[0m {}", e);
+                    if let Some(qc_name) = qc {
+                        if let Some(ref cmds) = conn.quick_commands {
+                            if let Some(target_cmd) = cmds.iter().find(|c| c.name.eq_ignore_ascii_case(&qc_name)) {
+                                println!("\x1b[1;36m⚡ Executing '{}' on {}...\x1b[0m", target_cmd.name, conn.nickname);
+                                println!("\x1b[1;30mCommand: {}\x1b[0m\n", target_cmd.command);
+                                if let Err(e) = ssh::execute_ssh_command(&conn, &target_cmd.command) {
+                                    eprintln!("\n\x1b[1;31mError:\x1b[0m {}", e);
+                                    std::process::exit(1);
+                                }
+                            } else {
+                                eprintln!("\x1b[1;31mError:\x1b[0m Quick command '{}' not found for server '{}'.", qc_name, nickname);
+                                std::process::exit(1);
+                            }
+                        } else {
+                            eprintln!("\x1b[1;31mError:\x1b[0m Server '{}' has no quick commands defined.", nickname);
+                            std::process::exit(1);
+                        }
+                    } else {
+                        if let Err(e) = ssh::execute_ssh(&conn) {
+                            eprintln!("\x1b[1;31mConnection Failed:\x1b[0m {}", e);
+                            std::process::exit(1);
+                        }
                     }
                 }
                 Ok(None) => {
                     eprintln!("\x1b[1;31mError:\x1b[0m Server with nickname '{}' not found. Use 'termos list' to view registered servers.", nickname);
+                    std::process::exit(1);
                 }
                 Err(e) => {
                     eprintln!("\x1b[1;31mDatabase Error:\x1b[0m {}", e);
+                    std::process::exit(1);
                 }
             }
         }

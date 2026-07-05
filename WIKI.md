@@ -54,7 +54,7 @@ termos [COMMAND]
 
 *   `termos` or `termos list`: Launches the interactive TUI connection manager.
 *   `termos add`: Launches the interactive server addition form.
-*   `termos connect <nickname>`: Initiates a direct SSH connection to the registered host matching `<nickname>`.
+*   `termos connect <nickname> [-q|--qc <qc_name>]`: Initiates a direct SSH connection to the registered host, or executes the specified quick command immediately without launching the interactive TUI.
 *   `termos delete <nickname>`: Deletes the registered connection matching `<nickname>`.
 *   `termos update`: Fetches and builds the latest release version directly from GitHub.
 
