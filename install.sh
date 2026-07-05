@@ -38,6 +38,7 @@ echo -e "${GREEN}[+] Building optimized release binary...${RESET}"
 cargo build --release
 
 echo -e "${GREEN}[+] Installing binary to /usr/local/bin/termos...${RESET}"
+sudo rm -f /usr/local/bin/termos
 sudo cp target/release/termos /usr/local/bin/termos
 sudo chmod +x /usr/local/bin/termos
 
