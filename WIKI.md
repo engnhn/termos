@@ -57,6 +57,7 @@ termos [COMMAND]
 *   `termos connect <nickname> [-q|--qc <qc_name>]`: Initiates a direct SSH connection to the registered host, or executes the specified quick command immediately without launching the interactive TUI.
 *   `termos delete <nickname>`: Deletes the registered connection matching `<nickname>`.
 *   `termos update`: Fetches and builds the latest release version directly from GitHub.
+*   `termos usage`: Launches the interactive page-based TUI user manual.
 
 ### Quick Command Subcommands (`termos qc`)
 

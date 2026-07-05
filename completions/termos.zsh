@@ -10,6 +10,7 @@ _termos() {
         'update:Update Termos to the latest version'
         'quick-command:Manage quick commands for a server'
         'qc:Manage quick commands for a server (alias)'
+        'usage:View detailed interactive user manual and usage guide'
     )
 
     if (( CURRENT == 2 )); then

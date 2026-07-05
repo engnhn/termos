@@ -41,6 +41,8 @@ enum Commands {
         #[command(subcommand)]
         subcommand: QcCommands,
     },
+    /// View detailed interactive user manual and usage guide
+    Usage,
     /// Hidden subcommand for shell tab completion listing nicknames
     #[command(name = "_list-nicknames", hide = true)]
     _ListNicknames,
@@ -265,6 +267,11 @@ fn main() {
                         }
                     }
                 }
+            }
+        }
+        Commands::Usage => {
+            if let Err(e) = tui::run_usage_viewer() {
+                eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
             }
         }
         Commands::_ListNicknames => {
