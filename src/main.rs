@@ -30,6 +30,8 @@ enum Commands {
         /// Nickname of the server to delete
         nickname: String,
     },
+    /// Update Termos to the latest version directly from GitHub
+    Update,
     /// Hidden subcommand for shell tab completion listing nicknames
     #[command(name = "_list-nicknames", hide = true)]
     _ListNicknames,
@@ -107,6 +109,19 @@ fn main() {
                 }
                 Err(e) => {
                     eprintln!("\x1b[1;31mDatabase Error:\x1b[0m {}", e);
+                }
+            }
+        }
+        Commands::Update => {
+            println!("\x1b[1;36m⚡ Fetching and installing the latest version of Termos from GitHub...\x1b[0m");
+            let mut cmd = std::process::Command::new("bash");
+            cmd.arg("-c").arg("curl -fsSL https://raw.githubusercontent.com/engnhn/termos/main/install.sh | bash");
+            match cmd.status() {
+                Ok(status) if status.success() => {
+                    println!("\x1b[1;32m✔ Termos updated successfully!\x1b[0m");
+                }
+                _ => {
+                    eprintln!("\x1b[1;31mError:\x1b[0m Failed to update Termos. Please verify curl and internet access.");
                 }
             }
         }

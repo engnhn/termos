@@ -4,7 +4,7 @@ _termos_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    opts="add connect list delete"
+    opts="add connect list delete update"
 
     if [[ ${COMP_CWORD} -eq 1 ]]; then
         COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )

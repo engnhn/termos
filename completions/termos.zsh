@@ -7,6 +7,7 @@ _termos() {
         'connect:Establish an SSH connection to a saved server'
         'list:List all registered servers'
         'delete:Delete a registered server connection'
+        'update:Update Termos to the latest version'
     )
 
     if (( CURRENT == 2 )); then
