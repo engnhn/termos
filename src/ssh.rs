@@ -114,3 +114,44 @@ pub fn execute_ssh(conn: &ServerConnection) -> Result<(), String> {
         Err("SSH session exited with an error.".to_string())
     }
 }
+
+pub fn execute_ssh_command(conn: &ServerConnection, cmd_str: &str) -> Result<(), String> {
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("Failed to get current executable path: {}", e))?;
+
+    let mut ssh_args = vec![
+        "-p".to_string(),
+        conn.port.to_string(),
+        "-o".to_string(),
+        "ServerAliveInterval=15".to_string(),
+        "-o".to_string(),
+        "ServerAliveCountMax=3".to_string(),
+    ];
+
+    if let Some(ref key) = conn.ssh_key {
+        ssh_args.push("-i".to_string());
+        ssh_args.push(key.clone());
+    }
+
+    ssh_args.push(format!("{}@{}", conn.username, conn.host));
+    ssh_args.push(cmd_str.to_string());
+
+    let mut cmd = Command::new("ssh");
+    cmd.args(ssh_args);
+
+    if let Some(ref password) = conn.password {
+        cmd.env("SSH_ASKPASS", &current_exe);
+        cmd.env("SSH_ASKPASS_REQUIRE", "force");
+        cmd.env("TERMOS_ASKPASS_PASSWORD", password);
+        if std::env::var("DISPLAY").is_err() {
+            cmd.env("DISPLAY", ":0");
+        }
+    }
+
+    let status = cmd.status().map_err(|e| format!("Failed to run SSH: {}", e))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("SSH command execution failed.".to_string())
+    }
+}

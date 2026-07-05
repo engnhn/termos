@@ -1,6 +1,6 @@
 use crate::storage::ServerConnection;
 use super::common::{draw_box, check_size_or_draw_error, TerminalGuard};
-use super::wizard::run_add_wizard;
+use super::wizard::{run_wizard, run_qc_wizard};
 use crossterm::{
     event::{self, Event, KeyCode},
     style::{Attribute, Color, ResetColor, SetAttribute, SetForegroundColor},
@@ -17,15 +17,37 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
     let mut scroll_offset = 0;
     let mut confirm_delete = false;
     let mut status_msg: Option<String> = None;
+    let mut active_group: Option<String> = None;
+    
+    let mut show_group_select = false;
+    let mut group_select_idx = 0;
+    let mut groups: Vec<String> = Vec::new();
+
+    let mut show_quick_commands = false;
+    let mut quick_command_idx = 0;
+
+    let mut show_manage_server = false;
+    let mut manage_server_idx = 0;
+
+    let mut show_manage_qc = false;
+    let mut manage_qc_idx = 0;
+    let mut qc_confirm_delete = false;
+
     let box_width = 66;
     let box_height = 18;
 
     let result = loop {
-        let conns = match crate::storage::load_connections() {
+        let all_conns = match crate::storage::load_connections() {
             Ok(list) => list,
             Err(e) => {
                 break Err(format!("Database error: {}", e));
             }
+        };
+
+        let conns: Vec<ServerConnection> = if let Some(ref grp) = active_group {
+            all_conns.clone().into_iter().filter(|c| c.group.as_ref() == Some(grp)).collect()
+        } else {
+            all_conns.clone()
         };
 
         if !conns.is_empty() && selected_idx >= conns.len() {
@@ -55,16 +77,26 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
         let start_x = (cols.saturating_sub(box_width)) / 2;
         let start_y = (rows.saturating_sub(box_height)) / 2;
 
-        draw_box(&mut out, start_x, start_y, box_width, box_height, " TERMOS - CONNECTIONS ");
+        let title = if let Some(ref grp) = active_group {
+            format!(" TERMOS - CONNECTIONS ({}) ", grp)
+        } else {
+            " TERMOS - CONNECTIONS ".to_string()
+        };
+
+        draw_box(&mut out, start_x, start_y, box_width, box_height, &title);
 
         if conns.is_empty() {
-            let empty_msg = "No servers registered yet.";
+            let empty_msg = if active_group.is_some() {
+                "No servers in this group."
+            } else {
+                "No servers registered yet."
+            };
             let x = start_x + (box_width - empty_msg.chars().count() as u16) / 2;
             out.queue(crossterm::cursor::MoveTo(x, start_y + 5)).unwrap();
             out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
             print!("{}", empty_msg);
 
-            let add_hint = "Press [a] to add a new server or [Esc] to exit.";
+            let add_hint = "Press [a] to add a new server or [g] to filter.";
             let x2 = start_x + (box_width - add_hint.chars().count() as u16) / 2;
             out.queue(crossterm::cursor::MoveTo(x2, start_y + 7)).unwrap();
             print!("{}", add_hint);
@@ -83,7 +115,13 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                 out.queue(crossterm::cursor::MoveTo(start_x + 3, row_y)).unwrap();
 
                 let key_tag = if conn.ssh_key.is_some() { " [Key]" } else { "" };
-                let display_str = format!("{:<16} ({}){}", conn.nickname, format!("{}@{}:{}", conn.username, conn.host, conn.port), key_tag);
+                let group_tag = if let Some(ref g) = conn.group {
+                    format!(" [{}]", g)
+                } else {
+                    "".to_string()
+                };
+
+                let display_str = format!("{:<14}{} ({}){}", conn.nickname, group_tag, format!("{}@{}:{}", conn.username, conn.host, conn.port), key_tag);
                 let truncated_row: String = display_str.chars().take((box_width - 8) as usize).collect();
 
                 if is_selected {
@@ -139,7 +177,7 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                 out.queue(SetAttribute(Attribute::Reset)).unwrap();
             } else {
                 let help_l1 = "Navigate: [Up/Down] arrows  |  Connect: [Enter]";
-                let help_l2 = "Actions:  [a] Add Server  |  [d] Delete Server  |  [ESC] Exit";
+                let help_l2 = "Actions:  [a] Add  |  [d] Delete  |  [e] Manage  |  [g] Group  |  [c] Cmd";
 
                 let h1_x = start_x + (box_width - help_l1.chars().count() as u16) / 2;
                 let h2_x = start_x + (box_width - help_l2.chars().count() as u16) / 2;
@@ -154,9 +192,393 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
             }
         }
 
+        if show_group_select {
+            let overlay_w = 40;
+            let overlay_h = (groups.len() + 4).max(6) as u16;
+            let ox = start_x + (box_width - overlay_w) / 2;
+            let oy = start_y + (box_height - overlay_h) / 2;
+            draw_box(&mut out, ox, oy, overlay_w, overlay_h, " SELECT GROUP ");
+            
+            out.queue(crossterm::cursor::MoveTo(ox + 3, oy + 2)).unwrap();
+            if group_select_idx == 0 {
+                out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                out.queue(SetAttribute(Attribute::Bold)).unwrap();
+                print!("▶ ");
+                out.queue(SetForegroundColor(Color::White)).unwrap();
+                print!("[ Show All ]");
+            } else {
+                print!("  [ Show All ]");
+            }
+            out.queue(ResetColor).unwrap();
+            out.queue(SetAttribute(Attribute::Reset)).unwrap();
+
+            for (gi, gname) in groups.iter().enumerate() {
+                let row_y = oy + 3 + gi as u16;
+                out.queue(crossterm::cursor::MoveTo(ox + 3, row_y)).unwrap();
+                let is_focused = group_select_idx == gi + 1;
+                if is_focused {
+                    out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                    out.queue(SetAttribute(Attribute::Bold)).unwrap();
+                    print!("▶ ");
+                    out.queue(SetForegroundColor(Color::White)).unwrap();
+                    print!("{}", gname);
+                } else {
+                    print!("  ");
+                    out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                    print!("{}", gname);
+                }
+                out.queue(ResetColor).unwrap();
+                out.queue(SetAttribute(Attribute::Reset)).unwrap();
+            }
+        }
+
+        if show_quick_commands {
+            if let Some(active_conn) = conns.get(selected_idx) {
+                if let Some(ref cmds) = active_conn.quick_commands {
+                    let overlay_w = 46;
+                    let overlay_h = (cmds.len() + 4).max(6) as u16;
+                    let ox = start_x + (box_width - overlay_w) / 2;
+                    let oy = start_y + (box_height - overlay_h) / 2;
+                    draw_box(&mut out, ox, oy, overlay_w, overlay_h, " QUICK COMMANDS ");
+
+                    for (ci, cmd) in cmds.iter().enumerate() {
+                        let row_y = oy + 2 + ci as u16;
+                        out.queue(crossterm::cursor::MoveTo(ox + 3, row_y)).unwrap();
+                        let is_focused = quick_command_idx == ci;
+                        
+                        let display_cmd = format!("{}: {}", cmd.name, cmd.command);
+                        let truncated_cmd: String = display_cmd.chars().take((overlay_w - 8) as usize).collect();
+
+                        if is_focused {
+                            out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                            out.queue(SetAttribute(Attribute::Bold)).unwrap();
+                            print!("▶ ");
+                            out.queue(SetForegroundColor(Color::White)).unwrap();
+                            print!("{:<width$}", truncated_cmd, width = (overlay_w - 8) as usize);
+                        } else {
+                            print!("  ");
+                            out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                            print!("{:<width$}", truncated_cmd, width = (overlay_w - 8) as usize);
+                        }
+                        out.queue(ResetColor).unwrap();
+                        out.queue(SetAttribute(Attribute::Reset)).unwrap();
+                    }
+                }
+            }
+        }
+
+        if show_manage_server {
+            if let Some(active_conn) = conns.get(selected_idx) {
+                let overlay_w = 40;
+                let overlay_h = 8;
+                let ox = start_x + (box_width - overlay_w) / 2;
+                let oy = start_y + (box_height - overlay_h) / 2;
+                
+                let title = format!(" MANAGE: {} ", active_conn.nickname);
+                draw_box(&mut out, ox, oy, overlay_w, overlay_h, &title);
+
+                let options = ["1. Edit Server Fields", "2. Manage Quick Commands"];
+                for (oi, opt) in options.iter().enumerate() {
+                    let row_y = oy + 2 + oi as u16 * 2;
+                    out.queue(crossterm::cursor::MoveTo(ox + 4, row_y)).unwrap();
+                    let is_focused = manage_server_idx == oi;
+                    if is_focused {
+                        out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                        out.queue(SetAttribute(Attribute::Bold)).unwrap();
+                        print!("▶ ");
+                        out.queue(SetForegroundColor(Color::White)).unwrap();
+                        print!("{}", opt);
+                    } else {
+                        print!("  ");
+                        out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                        print!("{}", opt);
+                    }
+                    out.queue(ResetColor).unwrap();
+                    out.queue(SetAttribute(Attribute::Reset)).unwrap();
+                }
+            }
+        }
+
+        if show_manage_qc {
+            if let Some(active_conn) = conns.get(selected_idx) {
+                let qcs = active_conn.quick_commands.as_ref().cloned().unwrap_or_default();
+                let overlay_w = 56;
+                let overlay_h = 14;
+                let ox = start_x + (box_width - overlay_w) / 2;
+                let oy = start_y + (box_height - overlay_h) / 2;
+                
+                draw_box(&mut out, ox, oy, overlay_w, overlay_h, " MANAGE QUICK COMMANDS ");
+
+                if qcs.is_empty() {
+                    let empty_msg = "No quick commands defined.";
+                    let x = ox + (overlay_w - empty_msg.chars().count() as u16) / 2;
+                    out.queue(crossterm::cursor::MoveTo(x, oy + 4)).unwrap();
+                    out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                    print!("{}", empty_msg);
+                    out.queue(ResetColor).unwrap();
+                } else {
+                    for qi in 0..6 {
+                        if qi >= qcs.len() {
+                            break;
+                        }
+                        let qc = &qcs[qi];
+                        let row_y = oy + 2 + qi as u16;
+                        out.queue(crossterm::cursor::MoveTo(ox + 3, row_y)).unwrap();
+                        let is_focused = manage_qc_idx == qi;
+
+                        let display_qc = format!("{}: {}", qc.name, qc.command);
+                        let truncated_qc: String = display_qc.chars().take((overlay_w - 8) as usize).collect();
+
+                        if is_focused {
+                            out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                            out.queue(SetAttribute(Attribute::Bold)).unwrap();
+                            print!("▶ ");
+                            out.queue(SetForegroundColor(Color::White)).unwrap();
+                            print!("{:<width$}", truncated_qc, width = (overlay_w - 8) as usize);
+                        } else {
+                            print!("  ");
+                            out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                            print!("{:<width$}", truncated_qc, width = (overlay_w - 8) as usize);
+                        }
+                        out.queue(ResetColor).unwrap();
+                        out.queue(SetAttribute(Attribute::Reset)).unwrap();
+                    }
+                }
+
+                let qdiv_y = oy + overlay_h - 4;
+                
+                if qc_confirm_delete && !qcs.is_empty() {
+                    let target_qc = &qcs[manage_qc_idx];
+                    let confirm_line = format!("Delete '{}'? (y/n)", target_qc.name);
+                    let confirm_x = ox + (overlay_w - confirm_line.chars().count() as u16) / 2;
+                    out.queue(crossterm::cursor::MoveTo(confirm_x, qdiv_y + 1)).unwrap();
+                    out.queue(SetForegroundColor(Color::Black)).unwrap();
+                    out.queue(crossterm::style::SetBackgroundColor(Color::Red)).unwrap();
+                    out.queue(SetAttribute(Attribute::Bold)).unwrap();
+                    print!(" {} ", confirm_line);
+                    out.queue(ResetColor).unwrap();
+                    out.queue(crossterm::style::SetBackgroundColor(Color::Reset)).unwrap();
+                    out.queue(SetAttribute(Attribute::Reset)).unwrap();
+                } else {
+                    let qhelp_l1 = "Navigate: [Up/Down] arrows";
+                    let qhelp_l2 = "Actions:  [a] Add  |  [e] Edit  |  [d] Delete  |  [ESC] Back";
+
+                    let qh1_x = ox + (overlay_w - qhelp_l1.chars().count() as u16) / 2;
+                    let qh2_x = ox + (overlay_w - qhelp_l2.chars().count() as u16) / 2;
+
+                    out.queue(crossterm::cursor::MoveTo(qh1_x, qdiv_y + 1)).unwrap();
+                    out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                    print!("{}", qhelp_l1);
+
+                    out.queue(crossterm::cursor::MoveTo(qh2_x, qdiv_y + 2)).unwrap();
+                    print!("{}", qhelp_l2);
+                    out.queue(ResetColor).unwrap();
+                }
+            }
+        }
+
         out.flush().unwrap();
 
         if let Ok(Event::Key(key)) = event::read() {
+            if show_group_select {
+                match key.code {
+                    KeyCode::Esc => {
+                        show_group_select = false;
+                    }
+                    KeyCode::Up => {
+                        let total_options = groups.len() + 1;
+                        group_select_idx = if group_select_idx == 0 { total_options - 1 } else { group_select_idx - 1 };
+                    }
+                    KeyCode::Down => {
+                        let total_options = groups.len() + 1;
+                        group_select_idx = (group_select_idx + 1) % total_options;
+                    }
+                    KeyCode::Enter => {
+                        if group_select_idx == 0 {
+                            active_group = None;
+                        } else {
+                            active_group = Some(groups[group_select_idx - 1].clone());
+                        }
+                        selected_idx = 0;
+                        scroll_offset = 0;
+                        show_group_select = false;
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
+            if show_quick_commands {
+                if let Some(active_conn) = conns.get(selected_idx) {
+                    if let Some(ref cmds) = active_conn.quick_commands {
+                        match key.code {
+                            KeyCode::Esc => {
+                                show_quick_commands = false;
+                            }
+                            KeyCode::Up => {
+                                quick_command_idx = if quick_command_idx == 0 { cmds.len() - 1 } else { quick_command_idx - 1 };
+                            }
+                            KeyCode::Down => {
+                                quick_command_idx = (quick_command_idx + 1) % cmds.len();
+                            }
+                            KeyCode::Enter => {
+                                let selected_cmd = &cmds[quick_command_idx];
+                                drop(_guard);
+                                
+                                out.queue(Clear(ClearType::All)).unwrap();
+                                out.flush().unwrap();
+                                
+                                println!("\x1b[1;36m⚡ Executing '{}' on {}...\x1b[0m", selected_cmd.name, active_conn.nickname);
+                                println!("\x1b[1;30mCommand: {}\x1b[0m\n", selected_cmd.command);
+                                
+                                match crate::ssh::execute_ssh_command(active_conn, &selected_cmd.command) {
+                                    Ok(_) => {
+                                        println!("\n\x1b[1;32m✔ Command execution finished successfully.\x1b[0m");
+                                    }
+                                    Err(e) => {
+                                        eprintln!("\n\x1b[1;31mError: {}\x1b[0m", e);
+                                    }
+                                }
+                                
+                                println!("\x1b[1;33mPress Enter to return to Termos...\x1b[0m");
+                                let mut buffer = String::new();
+                                let _ = std::io::stdin().read_line(&mut buffer);
+                                
+                                _guard = TerminalGuard::create()?;
+                                show_quick_commands = false;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                continue;
+            }
+
+            if show_manage_server {
+                if let Some(active_conn) = conns.get(selected_idx) {
+                    match key.code {
+                        KeyCode::Esc => {
+                            show_manage_server = false;
+                        }
+                        KeyCode::Up => {
+                            manage_server_idx = if manage_server_idx == 0 { 1 } else { manage_server_idx - 1 };
+                        }
+                        KeyCode::Down => {
+                            manage_server_idx = (manage_server_idx + 1) % 2;
+                        }
+                        KeyCode::Enter => {
+                            if manage_server_idx == 0 {
+                                drop(_guard);
+                                match run_wizard(Some(active_conn)) {
+                                    Ok(Some(updated)) => {
+                                        if let Err(e) = crate::storage::update_connection(&active_conn.nickname, updated) {
+                                            status_msg = Some(format!("Edit failed: {}", e));
+                                        } else {
+                                            status_msg = Some("✔ Server changes saved!".to_string());
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                _guard = TerminalGuard::create()?;
+                                show_manage_server = false;
+                            } else {
+                                show_manage_server = false;
+                                show_manage_qc = true;
+                                manage_qc_idx = 0;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                continue;
+            }
+
+            if show_manage_qc {
+                if let Some(active_conn) = conns.get(selected_idx) {
+                    let qcs = active_conn.quick_commands.as_ref().cloned().unwrap_or_default();
+                    
+                    if qc_confirm_delete && !qcs.is_empty() {
+                        match key.code {
+                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                                let target_qc = &qcs[manage_qc_idx];
+                                if let Err(e) = crate::storage::delete_quick_command(&active_conn.nickname, &target_qc.name) {
+                                    status_msg = Some(format!("Delete failed: {}", e));
+                                } else {
+                                    status_msg = Some("✔ Command deleted.".to_string());
+                                }
+                                qc_confirm_delete = false;
+                                manage_qc_idx = 0;
+                            }
+                            _ => {
+                                qc_confirm_delete = false;
+                            }
+                        }
+                        continue;
+                    }
+
+                    match key.code {
+                        KeyCode::Esc => {
+                            show_manage_qc = false;
+                            show_manage_server = true;
+                            manage_server_idx = 1;
+                        }
+                        KeyCode::Up => {
+                            if !qcs.is_empty() {
+                                manage_qc_idx = if manage_qc_idx == 0 { qcs.len() - 1 } else { manage_qc_idx - 1 };
+                            }
+                        }
+                        KeyCode::Down => {
+                            if !qcs.is_empty() {
+                                manage_qc_idx = (manage_qc_idx + 1) % qcs.len();
+                            }
+                        }
+                        KeyCode::Char('a') | KeyCode::Char('A') => {
+                            drop(_guard);
+                            match run_qc_wizard(None) {
+                                Ok(Some(new_qc)) => {
+                                    if let Err(e) = crate::storage::add_quick_command(&active_conn.nickname, new_qc) {
+                                        status_msg = Some(format!("Add failed: {}", e));
+                                    } else {
+                                        status_msg = Some("✔ Command added.".to_string());
+                                    }
+                                }
+                                _ => {}
+                            }
+                            _guard = TerminalGuard::create()?;
+                        }
+                        KeyCode::Char('e') | KeyCode::Char('E') => {
+                            if !qcs.is_empty() {
+                                let target_qc = &qcs[manage_qc_idx];
+                                drop(_guard);
+                                match run_qc_wizard(Some(target_qc)) {
+                                    Ok(Some(updated)) => {
+                                        if let Err(e) = crate::storage::edit_quick_command(
+                                            &active_conn.nickname,
+                                            &target_qc.name,
+                                            Some(updated.name),
+                                            Some(updated.command)
+                                        ) {
+                                            status_msg = Some(format!("Edit failed: {}", e));
+                                        } else {
+                                            status_msg = Some("✔ Command updated.".to_string());
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                _guard = TerminalGuard::create()?;
+                            }
+                        }
+                        KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete => {
+                            if !qcs.is_empty() {
+                                qc_confirm_delete = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                continue;
+            }
+
             if confirm_delete && !conns.is_empty() {
                 match key.code {
                     KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
@@ -201,9 +623,43 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                         break Ok(Some(conns[selected_idx].clone()));
                     }
                 }
+                KeyCode::Char('g') | KeyCode::Char('G') | KeyCode::Char('/') => {
+                    let mut unique_groups = Vec::new();
+                    for c in &all_conns {
+                        if let Some(ref g) = c.group {
+                            if !unique_groups.contains(g) {
+                                unique_groups.push(g.clone());
+                            }
+                        }
+                    }
+                    if unique_groups.is_empty() {
+                        status_msg = Some("No groups defined yet.".to_string());
+                    } else {
+                        groups = unique_groups;
+                        group_select_idx = 0;
+                        show_group_select = true;
+                    }
+                }
+                KeyCode::Char('c') | KeyCode::Char('C') => {
+                    if !conns.is_empty() {
+                        let active_conn = &conns[selected_idx];
+                        if active_conn.quick_commands.is_some() {
+                            quick_command_idx = 0;
+                            show_quick_commands = true;
+                        } else {
+                            status_msg = Some("No quick commands for this server.".to_string());
+                        }
+                    }
+                }
+                KeyCode::Char('e') | KeyCode::Char('E') => {
+                    if !conns.is_empty() {
+                        manage_server_idx = 0;
+                        show_manage_server = true;
+                    }
+                }
                 KeyCode::Char('a') | KeyCode::Char('A') => {
                     drop(_guard);
-                    match run_add_wizard() {
+                    match run_wizard(None) {
                         Ok(Some(new_conn)) => {
                             let name = new_conn.nickname.clone();
                             if let Err(e) = crate::storage::add_connection(new_conn) {

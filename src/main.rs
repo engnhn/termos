@@ -32,9 +32,57 @@ enum Commands {
     },
     /// Update Termos to the latest version directly from GitHub
     Update,
+    /// Manage quick commands for a server
+    #[command(name = "quick-command", aliases = ["qc"])]
+    QuickCommand {
+        #[command(subcommand)]
+        subcommand: QcCommands,
+    },
     /// Hidden subcommand for shell tab completion listing nicknames
     #[command(name = "_list-nicknames", hide = true)]
     _ListNicknames,
+}
+
+#[derive(Subcommand)]
+pub enum QcCommands {
+    /// List quick commands (interactive TUI if nickname omitted)
+    List {
+        /// Nickname of the server (optional)
+        nickname: Option<String>,
+    },
+    /// Add a quick command (interactive TUI if parameters omitted)
+    Add {
+        /// Nickname of the server (optional)
+        nickname: Option<String>,
+        /// Name of the quick command (optional for interactive TUI)
+        #[arg(long)]
+        name: Option<String>,
+        /// The SSH command to execute (optional for interactive TUI)
+        #[arg(long)]
+        cmd: Option<String>,
+    },
+    /// Edit an existing quick command (interactive TUI if parameters omitted)
+    Edit {
+        /// Nickname of the server (optional)
+        nickname: Option<String>,
+        /// Current name of the quick command (optional for interactive TUI)
+        #[arg(long)]
+        name: Option<String>,
+        /// New name of the quick command (optional)
+        #[arg(long)]
+        new_name: Option<String>,
+        /// New SSH command string (optional)
+        #[arg(long)]
+        new_cmd: Option<String>,
+    },
+    /// Delete a quick command (interactive TUI if nickname/name omitted)
+    Delete {
+        /// Nickname of the server (optional)
+        nickname: Option<String>,
+        /// Name of the quick command to delete (optional for interactive TUI)
+        #[arg(long)]
+        name: Option<String>,
+    },
 }
 
 fn main() {
@@ -54,7 +102,7 @@ fn main() {
 
     match command {
         Commands::Add => {
-            match tui::run_add_wizard() {
+            match tui::run_wizard(None) {
                 Ok(Some(conn)) => {
                     let nickname = conn.nickname.clone();
                     if let Err(e) = add_connection(conn) {
@@ -122,6 +170,75 @@ fn main() {
                 }
                 _ => {
                     eprintln!("\x1b[1;31mError:\x1b[0m Failed to update Termos. Please verify curl and internet access.");
+                }
+            }
+        }
+        Commands::QuickCommand { subcommand } => {
+            match subcommand {
+                QcCommands::List { nickname } => {
+                    if let Err(e) = tui::run_qc_manager(nickname, tui::QcMode::List) {
+                        eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                    }
+                }
+                QcCommands::Add { nickname, name, cmd } => {
+                    if nickname.is_some() && name.is_some() && cmd.is_some() {
+                        let nickname = nickname.unwrap();
+                        let name = name.unwrap();
+                        let cmd = cmd.unwrap();
+                        let qc = crate::storage::QuickCommand { name, command: cmd };
+                        match crate::storage::add_quick_command(&nickname, qc) {
+                            Ok(_) => {
+                                println!("\x1b[1;32m✔\x1b[0m Quick command added successfully.");
+                            }
+                            Err(e) => {
+                                eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                            }
+                        }
+                    } else {
+                        if let Err(e) = tui::run_qc_manager(nickname, tui::QcMode::Add) {
+                            eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                        }
+                    }
+                }
+                QcCommands::Edit { nickname, name, new_name, new_cmd } => {
+                    if nickname.is_some() && name.is_some() {
+                        let nickname = nickname.unwrap();
+                        let name = name.unwrap();
+                        if new_name.is_none() && new_cmd.is_none() {
+                            eprintln!("\x1b[1;31mError:\x1b[0m Provide either --new-name or --new-cmd to edit.");
+                            return;
+                        }
+                        match crate::storage::edit_quick_command(&nickname, &name, new_name, new_cmd) {
+                            Ok(_) => {
+                                println!("\x1b[1;32m✔\x1b[0m Quick command updated successfully.");
+                            }
+                            Err(e) => {
+                                eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                            }
+                        }
+                    } else {
+                        if let Err(e) = tui::run_qc_manager(nickname, tui::QcMode::Edit) {
+                            eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                        }
+                    }
+                }
+                QcCommands::Delete { nickname, name } => {
+                    if nickname.is_some() && name.is_some() {
+                        let nickname = nickname.unwrap();
+                        let name = name.unwrap();
+                        match crate::storage::delete_quick_command(&nickname, &name) {
+                            Ok(_) => {
+                                println!("\x1b[1;32m✔\x1b[0m Quick command deleted successfully.");
+                            }
+                            Err(e) => {
+                                eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                            }
+                        }
+                    } else {
+                        if let Err(e) = tui::run_qc_manager(nickname, tui::QcMode::Delete) {
+                            eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                        }
+                    }
                 }
             }
         }
