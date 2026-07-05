@@ -103,7 +103,7 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
 
             if qcs.is_empty() {
                 let empty_msg = "No quick commands defined.";
-                let x = start_x + (box_width - empty_msg.chars().count() as u16) / 2;
+                let x = start_x + box_width.saturating_sub(empty_msg.chars().count() as u16) / 2;
                 out.queue(crossterm::cursor::MoveTo(x, start_y + 4)).unwrap();
                 out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                 print!("{}", empty_msg);
@@ -123,18 +123,18 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
                     let is_focused = qc_selected_idx == qi;
 
                     let display_qc = format!("{}: {}", qc.name, qc.command);
-                    let truncated_qc: String = display_qc.chars().take((box_width - 8) as usize).collect();
+                    let truncated_qc: String = display_qc.chars().take(box_width.saturating_sub(8) as usize).collect();
 
                     if is_focused {
                         out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                         out.queue(SetAttribute(Attribute::Bold)).unwrap();
                         print!("▶ ");
                         out.queue(SetForegroundColor(Color::White)).unwrap();
-                        print!("{:<width$}", truncated_qc, width = (box_width - 8) as usize);
+                        print!("{:<width$}", truncated_qc, width = box_width.saturating_sub(8) as usize);
                     } else {
                         print!("  ");
                         out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                        print!("{:<width$}", truncated_qc, width = (box_width - 8) as usize);
+                        print!("{:<width$}", truncated_qc, width = box_width.saturating_sub(8) as usize);
                     }
                     out.queue(ResetColor).unwrap();
                     out.queue(SetAttribute(Attribute::Reset)).unwrap();
@@ -146,7 +146,7 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
             if qc_confirm_delete && !qcs.is_empty() {
                 let target_qc = &qcs[qc_selected_idx];
                 let confirm_line = format!("Delete '{}'? (y/n)", target_qc.name);
-                let confirm_x = start_x + (box_width - confirm_line.chars().count() as u16) / 2;
+                let confirm_x = start_x + box_width.saturating_sub(confirm_line.chars().count() as u16) / 2;
                 out.queue(crossterm::cursor::MoveTo(confirm_x, div_y + 1)).unwrap();
                 out.queue(SetForegroundColor(Color::Black)).unwrap();
                 out.queue(crossterm::style::SetBackgroundColor(Color::Red)).unwrap();
@@ -156,7 +156,7 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
                 out.queue(crossterm::style::SetBackgroundColor(Color::Reset)).unwrap();
                 out.queue(SetAttribute(Attribute::Reset)).unwrap();
             } else if let Some(ref status) = status_msg {
-                let status_x = start_x + (box_width - status.chars().count() as u16) / 2;
+                let status_x = start_x + box_width.saturating_sub(status.chars().count() as u16) / 2;
                 out.queue(crossterm::cursor::MoveTo(status_x, div_y + 1)).unwrap();
                 out.queue(SetForegroundColor(Color::Green)).unwrap();
                 out.queue(SetAttribute(Attribute::Bold)).unwrap();
@@ -170,7 +170,7 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
                     QcMode::Edit => "Select command to Edit: [Enter]  |  [Esc] Back",
                     _ => "",
                 };
-                let h1_x = start_x + (box_width - help_l1.chars().count() as u16) / 2;
+                let h1_x = start_x + box_width.saturating_sub(help_l1.chars().count() as u16) / 2;
                 out.queue(crossterm::cursor::MoveTo(h1_x, div_y + 1)).unwrap();
                 out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                 print!("{}", help_l1);
@@ -257,7 +257,7 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
 
             if all_conns.is_empty() {
                 let empty_msg = "No servers registered yet.";
-                let x = start_x + (box_width - empty_msg.chars().count() as u16) / 2;
+                let x = start_x + box_width.saturating_sub(empty_msg.chars().count() as u16) / 2;
                 out.queue(crossterm::cursor::MoveTo(x, start_y + 5)).unwrap();
                 out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                 print!("{}", empty_msg);
@@ -284,24 +284,19 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
 
                     out.queue(crossterm::cursor::MoveTo(start_x + 3, row_y)).unwrap();
 
-                    let group_tag = if let Some(ref g) = conn.group {
-                        format!(" [{}]", g)
-                    } else {
-                        "".to_string()
-                    };
-                    let display_str = format!("{}{}", conn.nickname, group_tag);
-                    let truncated_row: String = display_str.chars().take((box_width - 8) as usize).collect();
+                    let display_str = format!("{}{}", conn.group.as_ref().map(|g| format!(" [{}]", g)).unwrap_or_default(), conn.nickname);
+                    let truncated_row: String = display_str.chars().take(box_width.saturating_sub(8) as usize).collect();
 
                     if is_selected {
                         out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                         out.queue(SetAttribute(Attribute::Bold)).unwrap();
                         print!("▶ ");
                         out.queue(SetForegroundColor(Color::White)).unwrap();
-                        print!("{:<width$}", truncated_row, width = (box_width - 8) as usize);
+                        print!("{:<width$}", truncated_row, width = box_width.saturating_sub(8) as usize);
                     } else {
                         print!("  ");
                         out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                        print!("{:<width$}", truncated_row, width = (box_width - 8) as usize);
+                        print!("{:<width$}", truncated_row, width = box_width.saturating_sub(8) as usize);
                     }
                     out.queue(ResetColor).unwrap();
                     out.queue(SetAttribute(Attribute::Reset)).unwrap();
@@ -310,7 +305,7 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
 
             let div_y = start_y + box_height - 4;
             let help_line = "Select server: [Up/Down]  |  Confirm: [Enter]  |  [Esc] Exit";
-            let h_x = start_x + (box_width - help_line.chars().count() as u16) / 2;
+            let h_x = start_x + box_width.saturating_sub(help_line.chars().count() as u16) / 2;
             out.queue(crossterm::cursor::MoveTo(h_x, div_y + 1)).unwrap();
             out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
             print!("{}", help_line);

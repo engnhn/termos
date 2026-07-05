@@ -1,6 +1,6 @@
 use crate::storage::ServerConnection;
 use super::common::{draw_box, check_size_or_draw_error, TerminalGuard};
-use super::wizard::{run_wizard, run_qc_wizard};
+use super::wizard::run_wizard;
 use crossterm::{
     event::{self, Event, KeyCode},
     style::{Attribute, Color, ResetColor, SetAttribute, SetForegroundColor},
@@ -29,11 +29,7 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
     let mut show_manage_server = false;
     let mut manage_server_idx = 0;
 
-    let mut show_manage_qc = false;
-    let mut manage_qc_idx = 0;
-    let mut qc_confirm_delete = false;
-
-    let box_width = 66;
+    let box_width = 76;
     let box_height = 18;
 
     let result = loop {
@@ -91,13 +87,13 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
             } else {
                 "No servers registered yet."
             };
-            let x = start_x + (box_width - empty_msg.chars().count() as u16) / 2;
+            let x = start_x + box_width.saturating_sub(empty_msg.chars().count() as u16) / 2;
             out.queue(crossterm::cursor::MoveTo(x, start_y + 5)).unwrap();
             out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
             print!("{}", empty_msg);
 
             let add_hint = "Press [a] to add a new server or [g] to filter.";
-            let x2 = start_x + (box_width - add_hint.chars().count() as u16) / 2;
+            let x2 = start_x + box_width.saturating_sub(add_hint.chars().count() as u16) / 2;
             out.queue(crossterm::cursor::MoveTo(x2, start_y + 7)).unwrap();
             print!("{}", add_hint);
             out.queue(ResetColor).unwrap();
@@ -140,12 +136,12 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
             }
 
             if scroll_offset > 0 {
-                out.queue(crossterm::cursor::MoveTo(start_x + box_width - 4, start_y + 2)).unwrap();
+                out.queue(crossterm::cursor::MoveTo(start_x + box_width.saturating_sub(4), start_y + 2)).unwrap();
                 out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                 print!("▲");
             }
             if scroll_offset + 8 < conns.len() {
-                out.queue(crossterm::cursor::MoveTo(start_x + box_width - 4, start_y + 9)).unwrap();
+                out.queue(crossterm::cursor::MoveTo(start_x + box_width.saturating_sub(4), start_y + 9)).unwrap();
                 out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                 print!("▼");
             }
@@ -157,7 +153,7 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
         if confirm_delete && !conns.is_empty() {
             let active_conn = &conns[selected_idx];
             let confirm_line = format!("Delete '{}'? (y/n)", active_conn.nickname);
-            let confirm_x = start_x + (box_width - confirm_line.chars().count() as u16) / 2;
+            let confirm_x = start_x + box_width.saturating_sub(confirm_line.chars().count() as u16) / 2;
             out.queue(crossterm::cursor::MoveTo(confirm_x, div_y + 1)).unwrap();
             out.queue(SetForegroundColor(Color::Black)).unwrap();
             out.queue(crossterm::style::SetBackgroundColor(Color::Red)).unwrap();
@@ -168,7 +164,7 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
             out.queue(SetAttribute(Attribute::Reset)).unwrap();
         } else {
             if let Some(ref status) = status_msg {
-                let status_x = start_x + (box_width - status.chars().count() as u16) / 2;
+                let status_x = start_x + box_width.saturating_sub(status.chars().count() as u16) / 2;
                 out.queue(crossterm::cursor::MoveTo(status_x, div_y + 1)).unwrap();
                 out.queue(SetForegroundColor(Color::Green)).unwrap();
                 out.queue(SetAttribute(Attribute::Bold)).unwrap();
@@ -177,10 +173,10 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                 out.queue(SetAttribute(Attribute::Reset)).unwrap();
             } else {
                 let help_l1 = "Navigate: [Up/Down] arrows  |  Connect: [Enter]";
-                let help_l2 = "Actions:  [a] Add  |  [d] Delete  |  [e] Manage  |  [g] Group  |  [c] Cmd";
+                let help_l2 = "Actions:  [a] Add  |  [d] Del  |  [e] Manage  |  [g] Group  |  [c] Cmd";
 
-                let h1_x = start_x + (box_width - help_l1.chars().count() as u16) / 2;
-                let h2_x = start_x + (box_width - help_l2.chars().count() as u16) / 2;
+                let h1_x = start_x + box_width.saturating_sub(help_l1.chars().count() as u16) / 2;
+                let h2_x = start_x + box_width.saturating_sub(help_l2.chars().count() as u16) / 2;
 
                 out.queue(crossterm::cursor::MoveTo(h1_x, div_y + 1)).unwrap();
                 out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
@@ -195,8 +191,8 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
         if show_group_select {
             let overlay_w = 40;
             let overlay_h = (groups.len() + 4).max(6) as u16;
-            let ox = start_x + (box_width - overlay_w) / 2;
-            let oy = start_y + (box_height - overlay_h) / 2;
+            let ox = start_x + box_width.saturating_sub(overlay_w) / 2;
+            let oy = start_y + box_height.saturating_sub(overlay_h) / 2;
             draw_box(&mut out, ox, oy, overlay_w, overlay_h, " SELECT GROUP ");
             
             out.queue(crossterm::cursor::MoveTo(ox + 3, oy + 2)).unwrap();
@@ -232,47 +228,12 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
             }
         }
 
-        if show_quick_commands {
-            if let Some(active_conn) = conns.get(selected_idx) {
-                if let Some(ref cmds) = active_conn.quick_commands {
-                    let overlay_w = 46;
-                    let overlay_h = (cmds.len() + 4).max(6) as u16;
-                    let ox = start_x + (box_width - overlay_w) / 2;
-                    let oy = start_y + (box_height - overlay_h) / 2;
-                    draw_box(&mut out, ox, oy, overlay_w, overlay_h, " QUICK COMMANDS ");
-
-                    for (ci, cmd) in cmds.iter().enumerate() {
-                        let row_y = oy + 2 + ci as u16;
-                        out.queue(crossterm::cursor::MoveTo(ox + 3, row_y)).unwrap();
-                        let is_focused = quick_command_idx == ci;
-                        
-                        let display_cmd = format!("{}: {}", cmd.name, cmd.command);
-                        let truncated_cmd: String = display_cmd.chars().take((overlay_w - 8) as usize).collect();
-
-                        if is_focused {
-                            out.queue(SetForegroundColor(Color::Cyan)).unwrap();
-                            out.queue(SetAttribute(Attribute::Bold)).unwrap();
-                            print!("▶ ");
-                            out.queue(SetForegroundColor(Color::White)).unwrap();
-                            print!("{:<width$}", truncated_cmd, width = (overlay_w - 8) as usize);
-                        } else {
-                            print!("  ");
-                            out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                            print!("{:<width$}", truncated_cmd, width = (overlay_w - 8) as usize);
-                        }
-                        out.queue(ResetColor).unwrap();
-                        out.queue(SetAttribute(Attribute::Reset)).unwrap();
-                    }
-                }
-            }
-        }
-
         if show_manage_server {
             if let Some(active_conn) = conns.get(selected_idx) {
                 let overlay_w = 40;
                 let overlay_h = 8;
-                let ox = start_x + (box_width - overlay_w) / 2;
-                let oy = start_y + (box_height - overlay_h) / 2;
+                let ox = start_x + box_width.saturating_sub(overlay_w) / 2;
+                let oy = start_y + box_height.saturating_sub(overlay_h) / 2;
                 
                 let title = format!(" MANAGE: {} ", active_conn.nickname);
                 draw_box(&mut out, ox, oy, overlay_w, overlay_h, &title);
@@ -299,80 +260,37 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
             }
         }
 
-        if show_manage_qc {
+        if show_quick_commands {
             if let Some(active_conn) = conns.get(selected_idx) {
-                let qcs = active_conn.quick_commands.as_ref().cloned().unwrap_or_default();
-                let overlay_w = 56;
-                let overlay_h = 14;
-                let ox = start_x + (box_width - overlay_w) / 2;
-                let oy = start_y + (box_height - overlay_h) / 2;
-                
-                draw_box(&mut out, ox, oy, overlay_w, overlay_h, " MANAGE QUICK COMMANDS ");
+                if let Some(ref cmds) = active_conn.quick_commands {
+                    let overlay_w = 46;
+                    let overlay_h = (cmds.len() + 4).max(6) as u16;
+                    let ox = start_x + box_width.saturating_sub(overlay_w) / 2;
+                    let oy = start_y + box_height.saturating_sub(overlay_h) / 2;
+                    draw_box(&mut out, ox, oy, overlay_w, overlay_h, " QUICK COMMANDS ");
 
-                if qcs.is_empty() {
-                    let empty_msg = "No quick commands defined.";
-                    let x = ox + (overlay_w - empty_msg.chars().count() as u16) / 2;
-                    out.queue(crossterm::cursor::MoveTo(x, oy + 4)).unwrap();
-                    out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                    print!("{}", empty_msg);
-                    out.queue(ResetColor).unwrap();
-                } else {
-                    for qi in 0..6 {
-                        if qi >= qcs.len() {
-                            break;
-                        }
-                        let qc = &qcs[qi];
-                        let row_y = oy + 2 + qi as u16;
+                    for (ci, cmd) in cmds.iter().enumerate() {
+                        let row_y = oy + 2 + ci as u16;
                         out.queue(crossterm::cursor::MoveTo(ox + 3, row_y)).unwrap();
-                        let is_focused = manage_qc_idx == qi;
-
-                        let display_qc = format!("{}: {}", qc.name, qc.command);
-                        let truncated_qc: String = display_qc.chars().take((overlay_w - 8) as usize).collect();
+                        let is_focused = quick_command_idx == ci;
+                        
+                        let display_cmd = format!("{}: {}", cmd.name, cmd.command);
+                        let truncated_cmd: String = display_cmd.chars().take((overlay_w - 8) as usize).collect();
 
                         if is_focused {
                             out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                             out.queue(SetAttribute(Attribute::Bold)).unwrap();
                             print!("▶ ");
                             out.queue(SetForegroundColor(Color::White)).unwrap();
-                            print!("{:<width$}", truncated_qc, width = (overlay_w - 8) as usize);
+                            print!("{:<width$}", truncated_cmd, width = (overlay_w - 8) as usize);
                         } else {
                             print!("  ");
                             out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                            print!("{:<width$}", truncated_qc, width = (overlay_w - 8) as usize);
+                            print!("{:<width$}", truncated_cmd, width = (overlay_w - 8) as usize);
                         }
                         out.queue(ResetColor).unwrap();
                         out.queue(SetAttribute(Attribute::Reset)).unwrap();
                     }
-                }
-
-                let qdiv_y = oy + overlay_h - 4;
-                
-                if qc_confirm_delete && !qcs.is_empty() {
-                    let target_qc = &qcs[manage_qc_idx];
-                    let confirm_line = format!("Delete '{}'? (y/n)", target_qc.name);
-                    let confirm_x = ox + (overlay_w - confirm_line.chars().count() as u16) / 2;
-                    out.queue(crossterm::cursor::MoveTo(confirm_x, qdiv_y + 1)).unwrap();
-                    out.queue(SetForegroundColor(Color::Black)).unwrap();
-                    out.queue(crossterm::style::SetBackgroundColor(Color::Red)).unwrap();
-                    out.queue(SetAttribute(Attribute::Bold)).unwrap();
-                    print!(" {} ", confirm_line);
-                    out.queue(ResetColor).unwrap();
-                    out.queue(crossterm::style::SetBackgroundColor(Color::Reset)).unwrap();
-                    out.queue(SetAttribute(Attribute::Reset)).unwrap();
-                } else {
-                    let qhelp_l1 = "Navigate: [Up/Down] arrows";
-                    let qhelp_l2 = "Actions:  [a] Add  |  [e] Edit  |  [d] Delete  |  [ESC] Back";
-
-                    let qh1_x = ox + (overlay_w - qhelp_l1.chars().count() as u16) / 2;
-                    let qh2_x = ox + (overlay_w - qhelp_l2.chars().count() as u16) / 2;
-
-                    out.queue(crossterm::cursor::MoveTo(qh1_x, qdiv_y + 1)).unwrap();
-                    out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                    print!("{}", qhelp_l1);
-
-                    out.queue(crossterm::cursor::MoveTo(qh2_x, qdiv_y + 2)).unwrap();
-                    print!("{}", qhelp_l2);
-                    out.queue(ResetColor).unwrap();
                 }
             }
         }
@@ -483,94 +401,9 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                                 show_manage_server = false;
                             } else {
                                 show_manage_server = false;
-                                show_manage_qc = true;
-                                manage_qc_idx = 0;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                continue;
-            }
-
-            if show_manage_qc {
-                if let Some(active_conn) = conns.get(selected_idx) {
-                    let qcs = active_conn.quick_commands.as_ref().cloned().unwrap_or_default();
-                    
-                    if qc_confirm_delete && !qcs.is_empty() {
-                        match key.code {
-                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                                let target_qc = &qcs[manage_qc_idx];
-                                if let Err(e) = crate::storage::delete_quick_command(&active_conn.nickname, &target_qc.name) {
-                                    status_msg = Some(format!("Delete failed: {}", e));
-                                } else {
-                                    status_msg = Some("✔ Command deleted.".to_string());
-                                }
-                                qc_confirm_delete = false;
-                                manage_qc_idx = 0;
-                            }
-                            _ => {
-                                qc_confirm_delete = false;
-                            }
-                        }
-                        continue;
-                    }
-
-                    match key.code {
-                        KeyCode::Esc => {
-                            show_manage_qc = false;
-                            show_manage_server = true;
-                            manage_server_idx = 1;
-                        }
-                        KeyCode::Up => {
-                            if !qcs.is_empty() {
-                                manage_qc_idx = if manage_qc_idx == 0 { qcs.len() - 1 } else { manage_qc_idx - 1 };
-                            }
-                        }
-                        KeyCode::Down => {
-                            if !qcs.is_empty() {
-                                manage_qc_idx = (manage_qc_idx + 1) % qcs.len();
-                            }
-                        }
-                        KeyCode::Char('a') | KeyCode::Char('A') => {
-                            drop(_guard);
-                            match run_qc_wizard(None) {
-                                Ok(Some(new_qc)) => {
-                                    if let Err(e) = crate::storage::add_quick_command(&active_conn.nickname, new_qc) {
-                                        status_msg = Some(format!("Add failed: {}", e));
-                                    } else {
-                                        status_msg = Some("✔ Command added.".to_string());
-                                    }
-                                }
-                                _ => {}
-                            }
-                            _guard = TerminalGuard::create()?;
-                        }
-                        KeyCode::Char('e') | KeyCode::Char('E') => {
-                            if !qcs.is_empty() {
-                                let target_qc = &qcs[manage_qc_idx];
                                 drop(_guard);
-                                match run_qc_wizard(Some(target_qc)) {
-                                    Ok(Some(updated)) => {
-                                        if let Err(e) = crate::storage::edit_quick_command(
-                                            &active_conn.nickname,
-                                            &target_qc.name,
-                                            Some(updated.name),
-                                            Some(updated.command)
-                                        ) {
-                                            status_msg = Some(format!("Edit failed: {}", e));
-                                        } else {
-                                            status_msg = Some("✔ Command updated.".to_string());
-                                        }
-                                    }
-                                    _ => {}
-                                }
+                                let _ = super::qc_manager::run_qc_manager(Some(active_conn.nickname.clone()), super::qc_manager::QcMode::List);
                                 _guard = TerminalGuard::create()?;
-                            }
-                        }
-                        KeyCode::Char('d') | KeyCode::Char('D') | KeyCode::Delete => {
-                            if !qcs.is_empty() {
-                                qc_confirm_delete = true;
                             }
                         }
                         _ => {}
