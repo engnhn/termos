@@ -140,3 +140,16 @@ To prevent garbled shell sessions on crashes or unexpected exits, TUI actions ar
 - Alternate terminal screen buffers are closed.
 - Terminal raw mode is disabled.
 - Cursor visibility is restored.
+
+### TUI Suspension and Resumption Cycle
+When a subprocess is spawned (such as launching an interactive SSH session or executing a Quick Command):
+1. The active `TerminalGuard` is dropped, resetting the terminal state, disabling raw mode, and restoring standard stdout/stderr visibility.
+2. The subprocess executes in the foreground, with standard keyboard/mouse input routed directly to it.
+3. Once the subprocess exits, a new `TerminalGuard` is instantiated, restoring raw mode, switching back to the alternate screen buffer, and redrawing the dashboard layout cleanly.
+
+### Layout Constraints & Minimum Bounds
+To prevent layout wraps and guarantee clean rendering:
+- **Main Connections Dashboard**: Requires a minimum terminal viewport of `76` columns and `18` rows.
+- **Quick Command Manager**: Requires a minimum terminal viewport of `60` columns and `14` rows.
+If the terminal window falls below these thresholds, Termos halts layout rendering and draws a descriptive warning banner. The UI automatically resumes rendering once the window is resized above the threshold.
+

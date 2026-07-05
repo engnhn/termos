@@ -34,12 +34,59 @@ _termos() {
         esac
     elif (( CURRENT == 4 )); then
         case $words[2] in
+            connect)
+                local -a conn_opts
+                conn_opts=(
+                    '-q:Optional quick command name'
+                    '--qc:Optional quick command name'
+                )
+                _describe -t conn_opts 'connection options' conn_opts
+                ;;
             quick-command|qc)
                 case $words[3] in
                     list|add|edit|delete)
                         local -a nicknames
                         nicknames=(${(f)"$(termos _list-nicknames 2>/dev/null)"})
                         _describe -t nicknames 'saved servers' nicknames
+                        ;;
+                esac
+                ;;
+        esac
+    elif (( CURRENT >= 5 )); then
+        case $words[2] in
+            connect)
+                local -a conn_opts
+                conn_opts=(
+                    '-q:Optional quick command name'
+                    '--qc:Optional quick command name'
+                )
+                _describe -t conn_opts 'connection options' conn_opts
+                ;;
+            quick-command|qc)
+                case $words[3] in
+                    add)
+                        local -a add_opts
+                        add_opts=(
+                            '--name:Name of the quick command'
+                            '--cmd:The command string to run'
+                        )
+                        _describe -t add_opts 'add options' add_opts
+                        ;;
+                    edit)
+                        local -a edit_opts
+                        edit_opts=(
+                            '--name:Current name of the quick command'
+                            '--new-name:New name'
+                            '--new-cmd:New command string'
+                        )
+                        _describe -t edit_opts 'edit options' edit_opts
+                        ;;
+                    delete)
+                        local -a delete_opts
+                        delete_opts=(
+                            '--name:Name of the quick command to delete'
+                        )
+                        _describe -t delete_opts 'delete options' delete_opts
                         ;;
                 esac
                 ;;
