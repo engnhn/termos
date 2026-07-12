@@ -29,6 +29,10 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
     let mut show_manage_server = false;
     let mut manage_server_idx = 0;
 
+    let mut search_mode = false;
+    let mut search_query = String::new();
+    let mut search_cursor_pos = 0;
+
     let box_width = 76;
     let box_height = 18;
 
@@ -40,11 +44,21 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
             }
         };
 
-        let conns: Vec<ServerConnection> = if let Some(ref grp) = active_group {
+        let mut conns: Vec<ServerConnection> = if let Some(ref grp) = active_group {
             all_conns.clone().into_iter().filter(|c| c.group.as_ref() == Some(grp)).collect()
         } else {
             all_conns.clone()
         };
+
+        if !search_query.is_empty() {
+            let query_lower = search_query.to_lowercase();
+            conns = conns.into_iter().filter(|c| {
+                c.nickname.to_lowercase().contains(&query_lower)
+                    || c.host.to_lowercase().contains(&query_lower)
+                    || c.username.to_lowercase().contains(&query_lower)
+                    || c.group.as_ref().map(|g| g.to_lowercase().contains(&query_lower)).unwrap_or(false)
+            }).collect();
+        }
 
         if !conns.is_empty() && selected_idx >= conns.len() {
             selected_idx = conns.len() - 1;
@@ -81,20 +95,85 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
 
         draw_box(&mut out, start_x, start_y, box_width, box_height, &title);
 
+        out.queue(crossterm::cursor::MoveTo(start_x + 3, start_y + 2)).unwrap();
+        if search_mode {
+            out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+            out.queue(SetAttribute(Attribute::Bold)).unwrap();
+            print!("SEARCH : ");
+        } else {
+            out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+            print!("SEARCH : ");
+        }
+        out.queue(ResetColor).unwrap();
+        out.queue(SetAttribute(Attribute::Reset)).unwrap();
+
+        let search_display_width = 50;
+        if search_query.is_empty() {
+            if search_mode {
+                out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                print!("[");
+                out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                print!("{:<width$}", " Type to search... (Esc to exit)", width = search_display_width);
+                out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                print!("]");
+            } else {
+                out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                print!(" [ Press / to search connections...               ]");
+            }
+        } else {
+            let q_len = search_query.chars().count();
+            let sc_pos = search_cursor_pos.min(q_len);
+
+            let mut search_scroll = 0;
+            if sc_pos >= search_display_width {
+                search_scroll = sc_pos - search_display_width + 1;
+            }
+
+            let char_vec: Vec<char> = search_query.chars().collect();
+            let visible_query: String = char_vec
+                .iter()
+                .skip(search_scroll)
+                .take(search_display_width - 1)
+                .collect();
+            let val_to_show = format!(" {}", visible_query);
+
+            if search_mode {
+                out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                print!("[");
+                out.queue(SetForegroundColor(Color::White)).unwrap();
+                print!("{:<width$}", val_to_show, width = search_display_width);
+                out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                print!("]");
+            } else {
+                out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                print!(" ");
+                print!("{:<width$}", val_to_show, width = search_display_width);
+                print!(" ");
+            }
+        }
+        out.queue(ResetColor).unwrap();
+
+        out.queue(crossterm::cursor::MoveTo(start_x + 1, start_y + 3)).unwrap();
+        out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+        print!("{}", "─".repeat((box_width - 2) as usize));
+        out.queue(ResetColor).unwrap();
+
         if conns.is_empty() {
             let empty_msg = if active_group.is_some() {
-                "No servers in this group."
+                "No servers in this group matching the filter."
+            } else if !search_query.is_empty() {
+                "No servers match your search query."
             } else {
                 "No servers registered yet."
             };
             let x = start_x + box_width.saturating_sub(empty_msg.chars().count() as u16) / 2;
-            out.queue(crossterm::cursor::MoveTo(x, start_y + 5)).unwrap();
+            out.queue(crossterm::cursor::MoveTo(x, start_y + 6)).unwrap();
             out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
             print!("{}", empty_msg);
 
-            let add_hint = "Press [a] to add a new server or [g] to filter.";
+            let add_hint = "Press [a] to add a new server or [Esc] to clear search.";
             let x2 = start_x + box_width.saturating_sub(add_hint.chars().count() as u16) / 2;
-            out.queue(crossterm::cursor::MoveTo(x2, start_y + 7)).unwrap();
+            out.queue(crossterm::cursor::MoveTo(x2, start_y + 8)).unwrap();
             print!("{}", add_hint);
             out.queue(ResetColor).unwrap();
         } else {
@@ -106,7 +185,7 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
 
                 let conn = &conns[idx];
                 let is_selected = idx == selected_idx;
-                let row_y = start_y + 2 + i as u16;
+                let row_y = start_y + 4 + i as u16;
 
                 out.queue(crossterm::cursor::MoveTo(start_x + 3, row_y)).unwrap();
 
@@ -136,12 +215,12 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
             }
 
             if scroll_offset > 0 {
-                out.queue(crossterm::cursor::MoveTo(start_x + box_width.saturating_sub(4), start_y + 2)).unwrap();
+                out.queue(crossterm::cursor::MoveTo(start_x + box_width.saturating_sub(4), start_y + 4)).unwrap();
                 out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                 print!("▲");
             }
             if scroll_offset + 8 < conns.len() {
-                out.queue(crossterm::cursor::MoveTo(start_x + box_width.saturating_sub(4), start_y + 9)).unwrap();
+                out.queue(crossterm::cursor::MoveTo(start_x + box_width.saturating_sub(4), start_y + 11)).unwrap();
                 out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                 print!("▼");
             }
@@ -172,8 +251,8 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                 out.queue(ResetColor).unwrap();
                 out.queue(SetAttribute(Attribute::Reset)).unwrap();
             } else {
-                let help_l1 = "Navigate: [Up/Down] arrows  |  Connect: [Enter]";
-                let help_l2 = "Actions:  [a] Add  |  [d] Del  |  [e] Manage  |  [g] Group  |  [c] Cmd";
+                let help_l1 = "Navigate: [Up/Down]  |  Connect: [Enter]  |  Clear Search: [Esc]";
+                let help_l2 = "Actions:  [/] Search  |  [a] Add  |  [d] Del  |  [e] Manage  |  [g] Group  |  [c] Cmd";
 
                 let h1_x = start_x + box_width.saturating_sub(help_l1.chars().count() as u16) / 2;
                 let h2_x = start_x + box_width.saturating_sub(help_l2.chars().count() as u16) / 2;
@@ -293,6 +372,21 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                     }
                 }
             }
+        }
+
+        if search_mode {
+            let q_len = search_query.chars().count();
+            let sc_pos = search_cursor_pos.min(q_len);
+            let search_scroll = if sc_pos >= 50 {
+                sc_pos - 50 + 1
+            } else {
+                0
+            };
+            let cursor_col = start_x + 14 + (sc_pos - search_scroll) as u16;
+            out.queue(crossterm::cursor::MoveTo(cursor_col, start_y + 2)).unwrap();
+            out.queue(crossterm::cursor::Show).unwrap();
+        } else {
+            out.queue(crossterm::cursor::Hide).unwrap();
         }
 
         out.flush().unwrap();
@@ -435,10 +529,92 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                 continue;
             }
 
+            if search_mode {
+                match key.code {
+                    KeyCode::Esc => {
+                        search_mode = false;
+                    }
+                    KeyCode::Enter => {
+                        search_mode = false;
+                    }
+                    KeyCode::Up => {
+                        if !conns.is_empty() {
+                            selected_idx = if selected_idx == 0 { conns.len() - 1 } else { selected_idx - 1 };
+                        }
+                    }
+                    KeyCode::Down => {
+                        if !conns.is_empty() {
+                            selected_idx = (selected_idx + 1) % conns.len();
+                        }
+                    }
+                    KeyCode::Left => {
+                        if search_cursor_pos > 0 {
+                            search_cursor_pos -= 1;
+                        }
+                    }
+                    KeyCode::Right => {
+                        let q_len = search_query.chars().count();
+                        if search_cursor_pos < q_len {
+                            search_cursor_pos += 1;
+                        }
+                    }
+                    KeyCode::Home => {
+                        search_cursor_pos = 0;
+                    }
+                    KeyCode::End => {
+                        search_cursor_pos = search_query.chars().count();
+                    }
+                    KeyCode::Delete => {
+                        let char_count = search_query.chars().count();
+                        if search_cursor_pos < char_count {
+                            let mut chars: Vec<char> = search_query.chars().collect();
+                            chars.remove(search_cursor_pos);
+                            search_query = chars.into_iter().collect();
+                            selected_idx = 0;
+                            scroll_offset = 0;
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        let char_count = search_query.chars().count();
+                        if search_cursor_pos > 0 && search_cursor_pos <= char_count {
+                            let mut chars: Vec<char> = search_query.chars().collect();
+                            chars.remove(search_cursor_pos - 1);
+                            search_query = chars.into_iter().collect();
+                            search_cursor_pos -= 1;
+                            selected_idx = 0;
+                            scroll_offset = 0;
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        let char_count = search_query.chars().count();
+                        if search_cursor_pos <= char_count {
+                            let mut chars: Vec<char> = search_query.chars().collect();
+                            chars.insert(search_cursor_pos, c);
+                            search_query = chars.into_iter().collect();
+                            search_cursor_pos += 1;
+                            selected_idx = 0;
+                            scroll_offset = 0;
+                        }
+                    }
+                    _ => {}
+                }
+                continue;
+            }
+
             status_msg = None;
 
             match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => {
+                KeyCode::Esc => {
+                    if !search_query.is_empty() {
+                        search_query.clear();
+                        search_cursor_pos = 0;
+                        selected_idx = 0;
+                        scroll_offset = 0;
+                    } else {
+                        break Ok(None);
+                    }
+                }
+                KeyCode::Char('q') => {
                     break Ok(None);
                 }
                 KeyCode::Up => {
@@ -456,7 +632,13 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                         break Ok(Some(conns[selected_idx].clone()));
                     }
                 }
-                KeyCode::Char('g') | KeyCode::Char('G') | KeyCode::Char('/') => {
+                KeyCode::Char('/') => {
+                    search_mode = true;
+                    search_cursor_pos = search_query.chars().count();
+                    selected_idx = 0;
+                    scroll_offset = 0;
+                }
+                KeyCode::Char('g') | KeyCode::Char('G') => {
                     let mut unique_groups = Vec::new();
                     for c in &all_conns {
                         if let Some(ref g) = c.group {

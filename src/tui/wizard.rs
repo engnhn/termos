@@ -13,51 +13,82 @@ pub struct FormField {
     pub value: String,
     pub is_password: bool,
     pub placeholder: &'static str,
+    pub cursor_pos: usize,
+    pub scroll_offset: usize,
 }
 
 pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerConnection>, String> {
+    let nick_val = existing.map(|e| e.nickname.clone()).unwrap_or_default();
+    let nick_len = nick_val.chars().count();
+    let host_val = existing.map(|e| e.host.clone()).unwrap_or_default();
+    let host_len = host_val.chars().count();
+    let port_val = existing.map(|e| e.port.to_string()).unwrap_or_else(|| "22".to_string());
+    let port_len = port_val.chars().count();
+    let user_val = existing.map(|e| e.username.clone()).unwrap_or_else(|| "root".to_string());
+    let user_len = user_val.chars().count();
+    let pass_val = existing.and_then(|e| e.password.clone()).unwrap_or_default();
+    let pass_len = pass_val.chars().count();
+    let key_val = existing.and_then(|e| e.ssh_key.clone()).unwrap_or_default();
+    let key_len = key_val.chars().count();
+    let grp_val = existing.and_then(|e| e.group.clone()).unwrap_or_default();
+    let grp_len = grp_val.chars().count();
+
     let mut fields = vec![
         FormField {
             label: "Nickname",
-            value: existing.map(|e| e.nickname.clone()).unwrap_or_default(),
+            value: nick_val,
             is_password: false,
             placeholder: "e.g. my-server",
+            cursor_pos: nick_len,
+            scroll_offset: 0,
         },
         FormField {
             label: "IP / Hostname",
-            value: existing.map(|e| e.host.clone()).unwrap_or_default(),
+            value: host_val,
             is_password: false,
             placeholder: "e.g. 192.168.1.100",
+            cursor_pos: host_len,
+            scroll_offset: 0,
         },
         FormField {
             label: "Port",
-            value: existing.map(|e| e.port.to_string()).unwrap_or_else(|| "22".to_string()),
+            value: port_val,
             is_password: false,
             placeholder: "22",
+            cursor_pos: port_len,
+            scroll_offset: 0,
         },
         FormField {
             label: "Username",
-            value: existing.map(|e| e.username.clone()).unwrap_or_else(|| "root".to_string()),
+            value: user_val,
             is_password: false,
             placeholder: "root",
+            cursor_pos: user_len,
+            scroll_offset: 0,
         },
         FormField {
             label: "Password (Optional)",
-            value: existing.and_then(|e| e.password.clone()).unwrap_or_default(),
+            value: pass_val,
             is_password: true,
             placeholder: "••••••••",
+            cursor_pos: pass_len,
+            scroll_offset: 0,
         },
         FormField {
             label: "SSH Key Path (Optional)",
-            value: existing.and_then(|e| e.ssh_key.clone()).unwrap_or_default(),
+            value: key_val,
             is_password: false,
             placeholder: "e.g. /home/user/.ssh/id_rsa",
+            cursor_pos: key_len,
+            scroll_offset: 0,
         },
         FormField {
             label: "Group (Optional)",
-            value: existing.and_then(|e| e.group.clone()).unwrap_or_default(),
+            value: grp_val,
             is_password: false,
             placeholder: "e.g. production",
+            cursor_pos: grp_len,
+            scroll_offset: 0,
         },
     ];
 
@@ -90,7 +121,7 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
         let title = if existing.is_some() { " TERMOS - EDIT SERVER " } else { " TERMOS - ADD SERVER " };
         draw_box(&mut out, start_x, start_y, box_width, box_height, title);
 
-        for (i, field) in fields.iter().enumerate() {
+        for (i, field) in fields.iter_mut().enumerate() {
             let is_focused = active_idx == i;
             let field_y = start_y + 2 + i as u16 * 2;
 
@@ -106,34 +137,78 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
             out.queue(ResetColor).unwrap();
             out.queue(SetAttribute(Attribute::Reset)).unwrap();
 
-            let val_to_show = if field.value.is_empty() {
-                out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                format!(" {}", field.placeholder)
-            } else if field.is_password {
-                out.queue(SetForegroundColor(Color::Yellow)).unwrap();
-                format!(" {}", "•".repeat(field.value.len()))
-            } else {
-                out.queue(SetForegroundColor(Color::White)).unwrap();
-                format!(" {}", field.value)
-            };
+            let display_width = 27;
 
-            let input_frame_width = 31;
-            let truncated_val: String = val_to_show.chars().take(input_frame_width - 2).collect();
-
-            if is_focused {
-                out.queue(SetForegroundColor(Color::Cyan)).unwrap();
-                print!("[");
-                out.queue(SetForegroundColor(Color::White)).unwrap();
-                print!("{:<width$}", truncated_val, width = input_frame_width - 2);
-                out.queue(SetForegroundColor(Color::Cyan)).unwrap();
-                print!("]");
+            if field.value.is_empty() {
+                if is_focused {
+                    out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                    print!("[");
+                    out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                    let placeholder_text = format!(" {}", field.placeholder);
+                    let truncated_placeholder: String = placeholder_text.chars().take(display_width).collect();
+                    print!("{:<width$}", truncated_placeholder, width = display_width);
+                    out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                    print!("]");
+                } else {
+                    out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                    let placeholder_text = format!(" {}", field.placeholder);
+                    let truncated_placeholder: String = placeholder_text.chars().take(display_width).collect();
+                    print!(" [{:<width$}]", truncated_placeholder, width = display_width);
+                }
             } else {
-                out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                print!(" ");
-                print!("{:<width$}", truncated_val, width = input_frame_width - 2);
-                print!(" ");
+                let val_len = field.value.chars().count();
+                let c_pos = field.cursor_pos.min(val_len);
+
+                let mut scroll_offset = field.scroll_offset;
+                if c_pos < scroll_offset {
+                    scroll_offset = c_pos;
+                } else if c_pos > scroll_offset + display_width - 1 {
+                    scroll_offset = c_pos - (display_width - 1);
+                }
+                field.scroll_offset = scroll_offset;
+
+                let char_vec: Vec<char> = if field.is_password {
+                    std::iter::repeat('•').take(val_len).collect()
+                } else {
+                    field.value.chars().collect()
+                };
+
+                let char_take = display_width - 1;
+                let visible_chars: String = char_vec
+                    .iter()
+                    .skip(scroll_offset)
+                    .take(char_take)
+                    .collect();
+
+                let val_to_show = format!(" {}", visible_chars);
+
+                if is_focused {
+                    out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                    print!("[");
+                    out.queue(SetForegroundColor(Color::White)).unwrap();
+                    print!("{:<width$}", val_to_show, width = display_width);
+                    out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                    print!("]");
+                } else {
+                    out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                    print!(" ");
+                    print!("{:<width$}", val_to_show, width = display_width);
+                    print!(" ");
+                }
             }
             out.queue(ResetColor).unwrap();
+        }
+
+        if active_idx < 7 {
+            let field = &fields[active_idx];
+            let val_len = field.value.chars().count();
+            let c_pos = field.cursor_pos.min(val_len);
+            let cursor_col = start_x + 34 + (c_pos - field.scroll_offset) as u16;
+            let cursor_row = start_y + 2 + active_idx as u16 * 2;
+            out.queue(crossterm::cursor::MoveTo(cursor_col, cursor_row)).unwrap();
+            out.queue(crossterm::cursor::Show).unwrap();
+        } else {
+            out.queue(crossterm::cursor::Hide).unwrap();
         }
 
         let div_y = start_y + box_height - 5;
@@ -227,17 +302,50 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
                     error_msg = None;
                 }
                 KeyCode::Left => {
-                    if active_idx == 8 {
+                    if active_idx < 7 {
+                        let field = &mut fields[active_idx];
+                        if field.cursor_pos > 0 {
+                            field.cursor_pos -= 1;
+                        }
+                    } else if active_idx == 8 {
                         active_idx = 7;
                     } else if active_idx == 7 {
                         active_idx = 8;
                     }
                 }
                 KeyCode::Right => {
-                    if active_idx == 7 {
+                    if active_idx < 7 {
+                        let field = &mut fields[active_idx];
+                        let val_len = field.value.chars().count();
+                        if field.cursor_pos < val_len {
+                            field.cursor_pos += 1;
+                        }
+                    } else if active_idx == 7 {
                         active_idx = 8;
                     } else if active_idx == 8 {
                         active_idx = 7;
+                    }
+                }
+                KeyCode::Home => {
+                    if active_idx < 7 {
+                        fields[active_idx].cursor_pos = 0;
+                    }
+                }
+                KeyCode::End => {
+                    if active_idx < 7 {
+                        fields[active_idx].cursor_pos = fields[active_idx].value.chars().count();
+                    }
+                }
+                KeyCode::Delete => {
+                    if active_idx < 7 {
+                        let field = &mut fields[active_idx];
+                        let char_count = field.value.chars().count();
+                        if field.cursor_pos < char_count {
+                            let mut chars: Vec<char> = field.value.chars().collect();
+                            chars.remove(field.cursor_pos);
+                            field.value = chars.into_iter().collect();
+                        }
+                        error_msg = None;
                     }
                 }
                 KeyCode::Enter => {
@@ -256,13 +364,27 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
                 }
                 KeyCode::Backspace => {
                     if active_idx < 7 {
-                        fields[active_idx].value.pop();
+                        let field = &mut fields[active_idx];
+                        let char_count = field.value.chars().count();
+                        if field.cursor_pos > 0 && field.cursor_pos <= char_count {
+                            let mut chars: Vec<char> = field.value.chars().collect();
+                            chars.remove(field.cursor_pos - 1);
+                            field.value = chars.into_iter().collect();
+                            field.cursor_pos -= 1;
+                        }
                         error_msg = None;
                     }
                 }
                 KeyCode::Char(c) => {
                     if active_idx < 7 {
-                        fields[active_idx].value.push(c);
+                        let field = &mut fields[active_idx];
+                        let char_count = field.value.chars().count();
+                        if field.cursor_pos <= char_count {
+                            let mut chars: Vec<char> = field.value.chars().collect();
+                            chars.insert(field.cursor_pos, c);
+                            field.value = chars.into_iter().collect();
+                            field.cursor_pos += 1;
+                        }
                         error_msg = None;
                     }
                 }
@@ -316,18 +438,27 @@ fn validate_and_build(fields: &[FormField], existing: Option<&ServerConnection>)
 }
 
 pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<Option<crate::storage::QuickCommand>, String> {
+    let name_val = existing.map(|e| e.name.clone()).unwrap_or_default();
+    let name_len = name_val.chars().count();
+    let cmd_val = existing.map(|e| e.command.clone()).unwrap_or_default();
+    let cmd_len = cmd_val.chars().count();
+
     let mut fields = vec![
         FormField {
             label: "Command Name",
-            value: existing.map(|e| e.name.clone()).unwrap_or_default(),
+            value: name_val,
             is_password: false,
             placeholder: "e.g. Disk Usage",
+            cursor_pos: name_len,
+            scroll_offset: 0,
         },
         FormField {
             label: "SSH Command",
-            value: existing.map(|e| e.command.clone()).unwrap_or_default(),
+            value: cmd_val,
             is_password: false,
             placeholder: "e.g. df -h",
+            cursor_pos: cmd_len,
+            scroll_offset: 0,
         },
     ];
 
@@ -360,7 +491,7 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
         let title = if existing.is_some() { " EDIT QUICK COMMAND " } else { " ADD QUICK COMMAND " };
         draw_box(&mut out, start_x, start_y, box_width, box_height, title);
 
-        for (i, field) in fields.iter().enumerate() {
+        for (i, field) in fields.iter_mut().enumerate() {
             let is_focused = active_idx == i;
             let field_y = start_y + 2 + i as u16 * 2;
 
@@ -376,31 +507,73 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
             out.queue(ResetColor).unwrap();
             out.queue(SetAttribute(Attribute::Reset)).unwrap();
 
-            let val_to_show = if field.value.is_empty() {
-                out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                format!(" {}", field.placeholder)
-            } else {
-                out.queue(SetForegroundColor(Color::White)).unwrap();
-                format!(" {}", field.value)
-            };
+            let display_width = 26;
 
-            let input_frame_width = 28;
-            let truncated_val: String = val_to_show.chars().take(input_frame_width - 2).collect();
-
-            if is_focused {
-                out.queue(SetForegroundColor(Color::Cyan)).unwrap();
-                print!("[");
-                out.queue(SetForegroundColor(Color::White)).unwrap();
-                print!("{:<width$}", truncated_val, width = input_frame_width - 2);
-                out.queue(SetForegroundColor(Color::Cyan)).unwrap();
-                print!("]");
+            if field.value.is_empty() {
+                if is_focused {
+                    out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                    print!("[");
+                    out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                    let placeholder_text = format!(" {}", field.placeholder);
+                    let truncated_placeholder: String = placeholder_text.chars().take(display_width).collect();
+                    print!("{:<width$}", truncated_placeholder, width = display_width);
+                    out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                    print!("]");
+                } else {
+                    out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                    let placeholder_text = format!(" {}", field.placeholder);
+                    let truncated_placeholder: String = placeholder_text.chars().take(display_width).collect();
+                    print!(" [{:<width$}]", truncated_placeholder, width = display_width);
+                }
             } else {
-                out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                print!(" ");
-                print!("{:<width$}", truncated_val, width = input_frame_width - 2);
-                print!(" ");
+                let val_len = field.value.chars().count();
+                let c_pos = field.cursor_pos.min(val_len);
+
+                let mut scroll_offset = field.scroll_offset;
+                if c_pos < scroll_offset {
+                    scroll_offset = c_pos;
+                } else if c_pos > scroll_offset + display_width - 1 {
+                    scroll_offset = c_pos - (display_width - 1);
+                }
+                field.scroll_offset = scroll_offset;
+
+                let char_vec: Vec<char> = field.value.chars().collect();
+                let char_take = display_width - 1;
+                let visible_chars: String = char_vec
+                    .iter()
+                    .skip(scroll_offset)
+                    .take(char_take)
+                    .collect();
+
+                let val_to_show = format!(" {}", visible_chars);
+
+                if is_focused {
+                    out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                    print!("[");
+                    out.queue(SetForegroundColor(Color::White)).unwrap();
+                    print!("{:<width$}", val_to_show, width = display_width);
+                    out.queue(SetForegroundColor(Color::Cyan)).unwrap();
+                    print!("]");
+                } else {
+                    out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
+                    print!(" ");
+                    print!("{:<width$}", val_to_show, width = display_width);
+                    print!(" ");
+                }
             }
             out.queue(ResetColor).unwrap();
+        }
+
+        if active_idx < 2 {
+            let field = &fields[active_idx];
+            let val_len = field.value.chars().count();
+            let c_pos = field.cursor_pos.min(val_len);
+            let cursor_col = start_x + 24 + (c_pos - field.scroll_offset) as u16;
+            let cursor_row = start_y + 2 + active_idx as u16 * 2;
+            out.queue(crossterm::cursor::MoveTo(cursor_col, cursor_row)).unwrap();
+            out.queue(crossterm::cursor::Show).unwrap();
+        } else {
+            out.queue(crossterm::cursor::Hide).unwrap();
         }
 
         let btn_y = start_y + box_height - 3;
@@ -470,17 +643,50 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
                     error_msg = None;
                 }
                 KeyCode::Left => {
-                    if active_idx == 3 {
+                    if active_idx < 2 {
+                        let field = &mut fields[active_idx];
+                        if field.cursor_pos > 0 {
+                            field.cursor_pos -= 1;
+                        }
+                    } else if active_idx == 3 {
                         active_idx = 2;
                     } else if active_idx == 2 {
                         active_idx = 3;
                     }
                 }
                 KeyCode::Right => {
-                    if active_idx == 2 {
+                    if active_idx < 2 {
+                        let field = &mut fields[active_idx];
+                        let val_len = field.value.chars().count();
+                        if field.cursor_pos < val_len {
+                            field.cursor_pos += 1;
+                        }
+                    } else if active_idx == 2 {
                         active_idx = 3;
                     } else if active_idx == 3 {
                         active_idx = 2;
+                    }
+                }
+                KeyCode::Home => {
+                    if active_idx < 2 {
+                        fields[active_idx].cursor_pos = 0;
+                    }
+                }
+                KeyCode::End => {
+                    if active_idx < 2 {
+                        fields[active_idx].cursor_pos = fields[active_idx].value.chars().count();
+                    }
+                }
+                KeyCode::Delete => {
+                    if active_idx < 2 {
+                        let field = &mut fields[active_idx];
+                        let char_count = field.value.chars().count();
+                        if field.cursor_pos < char_count {
+                            let mut chars: Vec<char> = field.value.chars().collect();
+                            chars.remove(field.cursor_pos);
+                            field.value = chars.into_iter().collect();
+                        }
+                        error_msg = None;
                     }
                 }
                 KeyCode::Enter => {
@@ -500,13 +706,27 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
                 }
                 KeyCode::Backspace => {
                     if active_idx < 2 {
-                        fields[active_idx].value.pop();
+                        let field = &mut fields[active_idx];
+                        let char_count = field.value.chars().count();
+                        if field.cursor_pos > 0 && field.cursor_pos <= char_count {
+                            let mut chars: Vec<char> = field.value.chars().collect();
+                            chars.remove(field.cursor_pos - 1);
+                            field.value = chars.into_iter().collect();
+                            field.cursor_pos -= 1;
+                        }
                         error_msg = None;
                     }
                 }
                 KeyCode::Char(c) => {
                     if active_idx < 2 {
-                        fields[active_idx].value.push(c);
+                        let field = &mut fields[active_idx];
+                        let char_count = field.value.chars().count();
+                        if field.cursor_pos <= char_count {
+                            let mut chars: Vec<char> = field.value.chars().collect();
+                            chars.insert(field.cursor_pos, c);
+                            field.value = chars.into_iter().collect();
+                            field.cursor_pos += 1;
+                        }
                         error_msg = None;
                     }
                 }

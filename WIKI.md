@@ -13,13 +13,29 @@ Termos is designed for rapid navigation without taking your hands off the keyboa
 | Key | Action | Context |
 | :--- | :--- | :--- |
 | `Up` / `Down` | Navigate through listed connections | Scrollbar updates automatically if list exceeds 8 rows |
-| `Enter` | Connect to selected host | Spawns interactive SSH session |
+| `Enter` | Connect to selected host / Confirm search | Spawns interactive SSH session |
+| `/` | Enter search-as-you-type mode | Displays cursor & highlights search bar at top |
+| `Esc` | Clear search / Exit dashboard | Clears query if active; otherwise exits Termos dashboard |
 | `a` | Add new server connection | Opens full-screen Add Wizard form |
 | `d` | Delete connection configuration | Prompts confirmation banner |
 | `e` | Manage server configuration | Opens Edit/Quick Command manager menu |
-| `g` / `/` | Select group filter | Opens unique group list popover |
+| `g` / `G` | Select group filter | Opens unique group list popover |
 | `c` | Select & execute Quick Command | Opens quick commands popover for execution |
-| `Esc` / `q` | Exit Termos dashboard | Returns safely to standard terminal shell |
+| `q` | Exit Termos dashboard | Returns safely to standard terminal shell |
+
+### Add / Edit Connection Wizards
+
+Interactive fields in the wizards support advanced text input and cursor manipulation:
+
+| Key | Action | Context |
+| :--- | :--- | :--- |
+| `Up` / `Down` / `Tab` / `BackTab` | Move focus between form fields | Navigates fields, Save, and Cancel buttons |
+| `Left` / `Right` | Move input cursor precisely | Navigates character-by-character through input |
+| `Home` / `End` | Jump input cursor | Instantly moves cursor to the start or end of text |
+| `Backspace` | Delete preceding character | Deletes the character to the left of the cursor |
+| `Delete` | Delete character under cursor | Deletes the character directly at the cursor index |
+| `Ctrl + S` / Save Button | Validate fields and save | Persists server configuration |
+| `Esc` / Cancel Button | Discard changes | Discards wizard inputs and returns to dashboard |
 
 ### Quick Command TUI Manager (Fallback Mode)
 
@@ -31,12 +47,21 @@ Termos is designed for rapid navigation without taking your hands off the keyboa
 
 ---
 
-## 2. Advanced Workflows: Grouping & Remote Execution
+## 2. Advanced Workflows: Grouping, Search & Remote Execution
 
 ### Tag-Based Server Grouping
 *   **Concept**: Organize your connections into distinct groups (e.g. `production`, `staging`, `testing`).
-*   **Filtering**: Pressing `g` or `/` within the dashboard opens a selection overlay featuring all unique group tags.
-*   **Behavior**: Selecting a group filters the visible server list, isolating keyboard focus and connectivity actions to the active namespace. Selecting `[All]` clears the filter.
+*   **Filtering**: Pressing `g` or `G` within the dashboard opens a selection overlay featuring all unique group tags.
+*   **Behavior**: Selecting a group filters the visible server list. Selecting `[Show All]` clears the filter.
+
+### Search-as-you-Type Filtering
+*   **Mechanism**: Pressing `/` focuses the search input at the top of the main connections dashboard.
+*   **Real-time Filter**: As you type, the connection list is dynamically filtered against the server's **nickname**, **hostname/IP**, **username**, or **group**.
+*   **Persistent Focus**: Standard navigation arrows (`Up` / `Down`) remain active in search mode, allowing you to select a server from the filtered results while typing. Press `Enter` to immediately initiate a connection.
+*   **Clearing**: Pressing `Esc` deactivates search focus. Pressing `Esc` in standard mode while a filter is active clears the query and restores the full connection list.
+
+### Horizontal Text Scrolling
+*   **Wizard Fields**: Long server paths, commands, or keys automatically scroll horizontally within input frames. The visible text window shifts dynamically (`scroll_offset`) to ensure the cursor stays in view at all times.
 
 ### Quick Command Orchestration (`termos qc`)
 *   **TUI Execution Submenu**: Pressing `c` on any server configuration loads its predefined quick commands. Selecting one executes the script over SSH, suspends the TUI, displays output in raw terminal view, and waits for a keypress confirmation before restoring the dashboard.
