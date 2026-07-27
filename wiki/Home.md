@@ -1,6 +1,6 @@
 # termos
 
-termos is a local ssh connection manager written in rust. it manages saved host configurations, executes interactive ssh sessions using native system binaries, isolates credentials in memory, and provides terminal keyboard controls for navigation, search, and quick command execution.
+termos is a local ssh connection manager written in rust. it manages saved host configurations, executes interactive ssh sessions using native system binaries, isolates credentials in process memory, and provides terminal keyboard controls for navigation, search, and quick command execution.
 
 ## index
 
