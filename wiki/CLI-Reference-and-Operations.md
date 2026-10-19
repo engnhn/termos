@@ -12,7 +12,7 @@ termos commands follow the execution pattern `termos [subcommand] [arguments] [f
 | `termos qc add` | `[nickname] [--name <name> --cmd <command>]` | adds quick command programmatically or via tui wizard |
 | `termos qc edit` | `[nickname] [--name <name> --new-name <new_name> --new-cmd <new_cmd>]` | updates existing quick command fields |
 | `termos qc delete` | `[nickname] [--name <name>]` | deletes quick command matching name |
-| `termos update` | none | downloads and compiles latest release version from github |
+| `termos update` | none | downloads the latest Linux x86_64 release and verifies its GitHub artifact attestation before installing |
 | `termos usage` | none | opens interactive page-based terminal user manual |
 
 shell autocompletion scripts for bash and zsh are included in the `completions/` directory of the repository. during installation, `install.sh` registers these completions automatically. to configure completions manually, copy the corresponding completion script to system completion paths.

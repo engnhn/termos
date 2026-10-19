@@ -1,11 +1,11 @@
-use std::io::{stdout, Write};
+use super::common::{TerminalGuard, check_size_or_draw_error, draw_box};
 use crossterm::{
-    event::{self, Event, KeyCode},
     QueueableCommand,
-    style::{Color, SetForegroundColor, ResetColor, SetAttribute, Attribute},
+    event::{self, Event, KeyCode},
+    style::{Attribute, Color, ResetColor, SetAttribute, SetForegroundColor},
     terminal::{Clear, ClearType},
 };
-use super::common::{TerminalGuard, check_size_or_draw_error, draw_box};
+use std::io::{Write, stdout};
 
 pub fn run_usage_viewer() -> Result<(), String> {
     let mut _guard = TerminalGuard::create()?;
@@ -22,10 +22,10 @@ pub fn run_usage_viewer() -> Result<(), String> {
         let (cols, rows) = match check_size_or_draw_error(&mut out, box_width, box_height) {
             Ok(Some(sz)) => sz,
             _ => {
-                if let Ok(Event::Key(key)) = event::read() {
-                    if key.code == KeyCode::Esc || key.code == KeyCode::Char('q') {
-                        break;
-                    }
+                if let Ok(Event::Key(key)) = event::read()
+                    && (key.code == KeyCode::Esc || key.code == KeyCode::Char('q'))
+                {
+                    break;
                 }
                 continue;
             }
@@ -34,13 +34,18 @@ pub fn run_usage_viewer() -> Result<(), String> {
         let start_x = (cols.saturating_sub(box_width)) / 2;
         let start_y = (rows.saturating_sub(box_height)) / 2;
 
-        let title = format!(" USER MANUAL (PAGE {} OF {}) ", current_page + 1, total_pages);
+        let title = format!(
+            " USER MANUAL (PAGE {} OF {}) ",
+            current_page + 1,
+            total_pages
+        );
         draw_box(&mut out, start_x, start_y, box_width, box_height, &title);
 
         out.queue(SetForegroundColor(Color::White)).unwrap();
         match current_page {
             0 => {
-                out.queue(crossterm::cursor::MoveTo(start_x + 4, start_y + 2)).unwrap();
+                out.queue(crossterm::cursor::MoveTo(start_x + 4, start_y + 2))
+                    .unwrap();
                 out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                 out.queue(SetAttribute(Attribute::Bold)).unwrap();
                 print!("1. INTERACTIVE TUI DASHBOARD & NAVIGATION");
@@ -62,12 +67,17 @@ pub fn run_usage_viewer() -> Result<(), String> {
                 ];
 
                 for (idx, line) in lines.iter().enumerate() {
-                    out.queue(crossterm::cursor::MoveTo(start_x + 4, start_y + 4 + idx as u16)).unwrap();
+                    out.queue(crossterm::cursor::MoveTo(
+                        start_x + 4,
+                        start_y + 4 + idx as u16,
+                    ))
+                    .unwrap();
                     print!("{}", line);
                 }
             }
             1 => {
-                out.queue(crossterm::cursor::MoveTo(start_x + 4, start_y + 2)).unwrap();
+                out.queue(crossterm::cursor::MoveTo(start_x + 4, start_y + 2))
+                    .unwrap();
                 out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                 out.queue(SetAttribute(Attribute::Bold)).unwrap();
                 print!("2. QUICK COMMANDS (QC) ORCHESTRATION");
@@ -89,12 +99,17 @@ pub fn run_usage_viewer() -> Result<(), String> {
                 ];
 
                 for (idx, line) in lines.iter().enumerate() {
-                    out.queue(crossterm::cursor::MoveTo(start_x + 4, start_y + 4 + idx as u16)).unwrap();
+                    out.queue(crossterm::cursor::MoveTo(
+                        start_x + 4,
+                        start_y + 4 + idx as u16,
+                    ))
+                    .unwrap();
                     print!("{}", line);
                 }
             }
             2 => {
-                out.queue(crossterm::cursor::MoveTo(start_x + 4, start_y + 2)).unwrap();
+                out.queue(crossterm::cursor::MoveTo(start_x + 4, start_y + 2))
+                    .unwrap();
                 out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                 out.queue(SetAttribute(Attribute::Bold)).unwrap();
                 print!("3. SECURITY CONTROLS & AUTOCOMPLETION");
@@ -105,10 +120,11 @@ pub fn run_usage_viewer() -> Result<(), String> {
                 let lines = [
                     "SYSTEM BOUNDARY & CREDENTIAL ISOLATION:",
                     "• RAII TerminalGuard guarantees raw-mode resets on crashes or exits.",
-                    "• Passwords are piped to SSH client via secure SSH_ASKPASS handlers.",
-                    "  Prevents password exposure in user-inspectable system process trees.",
+                    "• Passwords use the desktop Secret Service; JSON stores only a reference.",
+                    "• Unix SSH_ASKPASS reads from an unlinked 0600 file descriptor.",
+                    "  Same-user processes can still access credentials during a session.",
                     "• Configurations stored under ~/.config/termos/connections.json",
-                    "  Protected with 0600 user-only permissions.",
+                    "  Directory uses 0700 and the file uses 0600 permissions.",
                     "",
                     "SHELL TAB COMPLETIONS:",
                     "• Automatic completions are registered for Bash and Zsh.",
@@ -116,7 +132,11 @@ pub fn run_usage_viewer() -> Result<(), String> {
                 ];
 
                 for (idx, line) in lines.iter().enumerate() {
-                    out.queue(crossterm::cursor::MoveTo(start_x + 4, start_y + 4 + idx as u16)).unwrap();
+                    out.queue(crossterm::cursor::MoveTo(
+                        start_x + 4,
+                        start_y + 4 + idx as u16,
+                    ))
+                    .unwrap();
                     print!("{}", line);
                 }
             }
@@ -126,7 +146,8 @@ pub fn run_usage_viewer() -> Result<(), String> {
         let div_y = start_y + box_height - 5;
         let help_line = "Page: [Left/Right] or [Tab]  |  Exit: [Esc] or [q]";
         let h_x = start_x + box_width.saturating_sub(help_line.chars().count() as u16) / 2;
-        out.queue(crossterm::cursor::MoveTo(h_x, div_y + 2)).unwrap();
+        out.queue(crossterm::cursor::MoveTo(h_x, div_y + 2))
+            .unwrap();
         out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
         print!("{}", help_line);
         out.queue(ResetColor).unwrap();
@@ -139,7 +160,11 @@ pub fn run_usage_viewer() -> Result<(), String> {
                     break;
                 }
                 KeyCode::Left | KeyCode::Up => {
-                    current_page = if current_page == 0 { total_pages - 1 } else { current_page - 1 };
+                    current_page = if current_page == 0 {
+                        total_pages - 1
+                    } else {
+                        current_page - 1
+                    };
                 }
                 KeyCode::Right | KeyCode::Down | KeyCode::Tab => {
                     current_page = (current_page + 1) % total_pages;

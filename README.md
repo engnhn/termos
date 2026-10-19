@@ -14,11 +14,18 @@ termos is a local ssh connection manager and terminal user interface for linux s
 
 ## quick start
 
-install the binary:
+Install GitHub CLI 2.102.0 or newer, then download and verify a release before installing it:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/engnhn/termos/main/install.sh | bash
+set -euo pipefail
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+gh release download --repo engnhn/termos --pattern termos-linux-x86_64 --dir "$tmp_dir"
+gh attestation verify "$tmp_dir/termos-linux-x86_64" --repo engnhn/termos --signer-workflow engnhn/termos/.github/workflows/release.yml
+install -Dm755 "$tmp_dir/termos-linux-x86_64" "$HOME/.local/bin/termos"
 ```
+
+Only releases published with the repository's signed-release workflow are accepted. Older releases without attestations fail verification and cannot be installed or updated automatically.
 
 or build from source:
 
@@ -26,12 +33,12 @@ or build from source:
 git clone https://github.com/engnhn/termos.git
 cd termos
 cargo build --release
-sudo cp target/release/termos /usr/local/bin/
+install -Dm755 target/release/termos "$HOME/.local/bin/termos"
 ```
 
 ## configuration
 
-configurations are stored in `~/.config/termos/connections.json` with strict `0600` permissions:
+Connection metadata is stored in `~/.config/termos/connections.json`; passwords are stored in the Linux desktop Secret Service (GNOME Keyring or KWallet). The config directory is `0700`, and the JSON file is `0600`.
 
 ```json
 [
@@ -40,7 +47,6 @@ configurations are stored in `~/.config/termos/connections.json` with strict `06
     "host": "192.168.1.15",
     "port": 22,
     "username": "root",
-    "password": "sample-password",
     "ssh_key": "/home/user/.ssh/id_ed25519",
     "group": "production",
     "quick_commands": [
@@ -52,6 +58,8 @@ configurations are stored in `~/.config/termos/connections.json` with strict `06
   }
 ]
 ```
+
+Legacy plaintext passwords are moved to the system credential store when Termos next reads the connection file. That migration fails closed if a Secret Service is unavailable; the original JSON is retained until the credential has been stored successfully.
 
 launch the interactive dashboard:
 

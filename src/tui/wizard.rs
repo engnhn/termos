@@ -1,12 +1,13 @@
+use super::common::{TerminalGuard, check_size_or_draw_error, draw_box};
 use crate::storage::ServerConnection;
-use super::common::{draw_box, check_size_or_draw_error, TerminalGuard};
 use crossterm::{
+    QueueableCommand,
     event::{self, Event, KeyCode, KeyModifiers},
     style::{Attribute, Color, ResetColor, SetAttribute, SetForegroundColor},
     terminal::{Clear, ClearType},
-    QueueableCommand,
 };
-use std::io::{stdout, Write};
+use std::io::{Write, stdout};
+use zeroize::Zeroize;
 
 pub struct FormField {
     pub label: &'static str,
@@ -17,16 +18,30 @@ pub struct FormField {
     pub scroll_offset: usize,
 }
 
+impl Drop for FormField {
+    fn drop(&mut self) {
+        if self.is_password {
+            self.value.zeroize();
+        }
+    }
+}
+
 pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerConnection>, String> {
     let nick_val = existing.map(|e| e.nickname.clone()).unwrap_or_default();
     let nick_len = nick_val.chars().count();
     let host_val = existing.map(|e| e.host.clone()).unwrap_or_default();
     let host_len = host_val.chars().count();
-    let port_val = existing.map(|e| e.port.to_string()).unwrap_or_else(|| "22".to_string());
+    let port_val = existing
+        .map(|e| e.port.to_string())
+        .unwrap_or_else(|| "22".to_string());
     let port_len = port_val.chars().count();
-    let user_val = existing.map(|e| e.username.clone()).unwrap_or_else(|| "root".to_string());
+    let user_val = existing
+        .map(|e| e.username.clone())
+        .unwrap_or_else(|| "root".to_string());
     let user_len = user_val.chars().count();
-    let pass_val = existing.and_then(|e| e.password.clone()).unwrap_or_default();
+    let pass_val = existing
+        .and_then(|e| e.password.clone())
+        .unwrap_or_default();
     let pass_len = pass_val.chars().count();
     let key_val = existing.and_then(|e| e.ssh_key.clone()).unwrap_or_default();
     let key_len = key_val.chars().count();
@@ -100,16 +115,16 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
     let box_width = 66;
     let box_height = 20;
 
-    let result = loop {
+    loop {
         out.queue(Clear(ClearType::All)).unwrap();
 
         let (cols, rows) = match check_size_or_draw_error(&mut out, box_width, box_height) {
             Ok(Some(sz)) => sz,
             _ => {
-                if let Ok(Event::Key(key)) = event::read() {
-                    if key.code == KeyCode::Esc {
-                        break Ok(None);
-                    }
+                if let Ok(Event::Key(key)) = event::read()
+                    && key.code == KeyCode::Esc
+                {
+                    break Ok(None);
                 }
                 continue;
             }
@@ -118,14 +133,19 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
         let start_x = (cols.saturating_sub(box_width)) / 2;
         let start_y = (rows.saturating_sub(box_height)) / 2;
 
-        let title = if existing.is_some() { " TERMOS - EDIT SERVER " } else { " TERMOS - ADD SERVER " };
+        let title = if existing.is_some() {
+            " TERMOS - EDIT SERVER "
+        } else {
+            " TERMOS - ADD SERVER "
+        };
         draw_box(&mut out, start_x, start_y, box_width, box_height, title);
 
         for (i, field) in fields.iter_mut().enumerate() {
             let is_focused = active_idx == i;
             let field_y = start_y + 2 + i as u16 * 2;
 
-            out.queue(crossterm::cursor::MoveTo(start_x + 3, field_y)).unwrap();
+            out.queue(crossterm::cursor::MoveTo(start_x + 3, field_y))
+                .unwrap();
             if is_focused {
                 out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                 out.queue(SetAttribute(Attribute::Bold)).unwrap();
@@ -145,15 +165,21 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
                     print!("[");
                     out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                     let placeholder_text = format!(" {}", field.placeholder);
-                    let truncated_placeholder: String = placeholder_text.chars().take(display_width).collect();
+                    let truncated_placeholder: String =
+                        placeholder_text.chars().take(display_width).collect();
                     print!("{:<width$}", truncated_placeholder, width = display_width);
                     out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                     print!("]");
                 } else {
                     out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                     let placeholder_text = format!(" {}", field.placeholder);
-                    let truncated_placeholder: String = placeholder_text.chars().take(display_width).collect();
-                    print!(" [{:<width$}]", truncated_placeholder, width = display_width);
+                    let truncated_placeholder: String =
+                        placeholder_text.chars().take(display_width).collect();
+                    print!(
+                        " [{:<width$}]",
+                        truncated_placeholder,
+                        width = display_width
+                    );
                 }
             } else {
                 let val_len = field.value.chars().count();
@@ -168,7 +194,7 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
                 field.scroll_offset = scroll_offset;
 
                 let char_vec: Vec<char> = if field.is_password {
-                    std::iter::repeat('•').take(val_len).collect()
+                    std::iter::repeat_n('•', val_len).collect()
                 } else {
                     field.value.chars().collect()
                 };
@@ -186,13 +212,21 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
                     out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                     print!("[");
                     out.queue(SetForegroundColor(Color::White)).unwrap();
-                    print!("{:<width$}", val_to_show, width = display_width);
+                    print!(
+                        "{:<width$}",
+                        super::common::safe_display(&val_to_show),
+                        width = display_width
+                    );
                     out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                     print!("]");
                 } else {
                     out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                     print!(" ");
-                    print!("{:<width$}", val_to_show, width = display_width);
+                    print!(
+                        "{:<width$}",
+                        super::common::safe_display(&val_to_show),
+                        width = display_width
+                    );
                     print!(" ");
                 }
             }
@@ -205,7 +239,8 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
             let c_pos = field.cursor_pos.min(val_len);
             let cursor_col = start_x + 34 + (c_pos - field.scroll_offset) as u16;
             let cursor_row = start_y + 2 + active_idx as u16 * 2;
-            out.queue(crossterm::cursor::MoveTo(cursor_col, cursor_row)).unwrap();
+            out.queue(crossterm::cursor::MoveTo(cursor_col, cursor_row))
+                .unwrap();
             out.queue(crossterm::cursor::Show).unwrap();
         } else {
             out.queue(crossterm::cursor::Hide).unwrap();
@@ -221,17 +256,20 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
             let help_y = div_y + 1 + i as u16;
             let line_len = line.chars().count() as u16;
             let help_x = start_x + (box_width - line_len) / 2;
-            out.queue(crossterm::cursor::MoveTo(help_x, help_y)).unwrap();
+            out.queue(crossterm::cursor::MoveTo(help_x, help_y))
+                .unwrap();
             print!("{}", line);
         }
         out.queue(ResetColor).unwrap();
 
         let btn_y = start_y + box_height - 4;
-        
-        out.queue(crossterm::cursor::MoveTo(start_x + 12, btn_y)).unwrap();
+
+        out.queue(crossterm::cursor::MoveTo(start_x + 12, btn_y))
+            .unwrap();
         if active_idx == 7 {
             out.queue(SetForegroundColor(Color::Black)).unwrap();
-            out.queue(crossterm::style::SetBackgroundColor(Color::Green)).unwrap();
+            out.queue(crossterm::style::SetBackgroundColor(Color::Green))
+                .unwrap();
             out.queue(SetAttribute(Attribute::Bold)).unwrap();
             print!("    SAVE (Enter)    ");
         } else {
@@ -240,13 +278,16 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
             print!(" [ SAVE ] ");
         }
         out.queue(ResetColor).unwrap();
-        out.queue(crossterm::style::SetBackgroundColor(Color::Reset)).unwrap();
+        out.queue(crossterm::style::SetBackgroundColor(Color::Reset))
+            .unwrap();
         out.queue(SetAttribute(Attribute::Reset)).unwrap();
 
-        out.queue(crossterm::cursor::MoveTo(start_x + box_width - 24, btn_y)).unwrap();
+        out.queue(crossterm::cursor::MoveTo(start_x + box_width - 24, btn_y))
+            .unwrap();
         if active_idx == 8 {
             out.queue(SetForegroundColor(Color::Black)).unwrap();
-            out.queue(crossterm::style::SetBackgroundColor(Color::Red)).unwrap();
+            out.queue(crossterm::style::SetBackgroundColor(Color::Red))
+                .unwrap();
             out.queue(SetAttribute(Attribute::Bold)).unwrap();
             print!("   CANCEL (Esc)   ");
         } else {
@@ -255,20 +296,23 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
             print!(" [ CANCEL ] ");
         }
         out.queue(ResetColor).unwrap();
-        out.queue(crossterm::style::SetBackgroundColor(Color::Reset)).unwrap();
+        out.queue(crossterm::style::SetBackgroundColor(Color::Reset))
+            .unwrap();
         out.queue(SetAttribute(Attribute::Reset)).unwrap();
 
         if let Some(ref err) = error_msg {
             let err_y = start_y + box_height - 3;
-            let clean_err = format!(" Error: {} ", err);
+            let clean_err = format!(" Error: {} ", super::common::safe_display(err));
             let err_x = start_x + (box_width.saturating_sub(clean_err.chars().count() as u16)) / 2;
             out.queue(crossterm::cursor::MoveTo(err_x, err_y)).unwrap();
             out.queue(SetForegroundColor(Color::Black)).unwrap();
-            out.queue(crossterm::style::SetBackgroundColor(Color::Red)).unwrap();
+            out.queue(crossterm::style::SetBackgroundColor(Color::Red))
+                .unwrap();
             out.queue(SetAttribute(Attribute::Bold)).unwrap();
             print!("{}", clean_err);
             out.queue(ResetColor).unwrap();
-            out.queue(crossterm::style::SetBackgroundColor(Color::Reset)).unwrap();
+            out.queue(crossterm::style::SetBackgroundColor(Color::Reset))
+                .unwrap();
             out.queue(SetAttribute(Attribute::Reset)).unwrap();
         }
 
@@ -326,27 +370,21 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
                         active_idx = 7;
                     }
                 }
-                KeyCode::Home => {
-                    if active_idx < 7 {
-                        fields[active_idx].cursor_pos = 0;
-                    }
+                KeyCode::Home if active_idx < 7 => {
+                    fields[active_idx].cursor_pos = 0;
                 }
-                KeyCode::End => {
-                    if active_idx < 7 {
-                        fields[active_idx].cursor_pos = fields[active_idx].value.chars().count();
-                    }
+                KeyCode::End if active_idx < 7 => {
+                    fields[active_idx].cursor_pos = fields[active_idx].value.chars().count();
                 }
-                KeyCode::Delete => {
-                    if active_idx < 7 {
-                        let field = &mut fields[active_idx];
-                        let char_count = field.value.chars().count();
-                        if field.cursor_pos < char_count {
-                            let mut chars: Vec<char> = field.value.chars().collect();
-                            chars.remove(field.cursor_pos);
-                            field.value = chars.into_iter().collect();
-                        }
-                        error_msg = None;
+                KeyCode::Delete if active_idx < 7 => {
+                    let field = &mut fields[active_idx];
+                    let char_count = field.value.chars().count();
+                    if field.cursor_pos < char_count {
+                        let mut chars: Vec<char> = field.value.chars().collect();
+                        chars.remove(field.cursor_pos);
+                        field.value = chars.into_iter().collect();
                     }
+                    error_msg = None;
                 }
                 KeyCode::Enter => {
                     if active_idx < 7 {
@@ -362,46 +400,43 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
                         break Ok(None);
                     }
                 }
-                KeyCode::Backspace => {
-                    if active_idx < 7 {
-                        let field = &mut fields[active_idx];
-                        let char_count = field.value.chars().count();
-                        if field.cursor_pos > 0 && field.cursor_pos <= char_count {
-                            let mut chars: Vec<char> = field.value.chars().collect();
-                            chars.remove(field.cursor_pos - 1);
-                            field.value = chars.into_iter().collect();
-                            field.cursor_pos -= 1;
-                        }
-                        error_msg = None;
+                KeyCode::Backspace if active_idx < 7 => {
+                    let field = &mut fields[active_idx];
+                    let char_count = field.value.chars().count();
+                    if field.cursor_pos > 0 && field.cursor_pos <= char_count {
+                        let mut chars: Vec<char> = field.value.chars().collect();
+                        chars.remove(field.cursor_pos - 1);
+                        field.value = chars.into_iter().collect();
+                        field.cursor_pos -= 1;
                     }
+                    error_msg = None;
                 }
-                KeyCode::Char(c) => {
-                    if active_idx < 7 {
-                        let field = &mut fields[active_idx];
-                        let char_count = field.value.chars().count();
-                        if field.cursor_pos <= char_count {
-                            let mut chars: Vec<char> = field.value.chars().collect();
-                            chars.insert(field.cursor_pos, c);
-                            field.value = chars.into_iter().collect();
-                            field.cursor_pos += 1;
-                        }
-                        error_msg = None;
+                KeyCode::Char(c) if active_idx < 7 => {
+                    let field = &mut fields[active_idx];
+                    let char_count = field.value.chars().count();
+                    if field.cursor_pos <= char_count {
+                        let mut chars: Vec<char> = field.value.chars().collect();
+                        chars.insert(field.cursor_pos, c);
+                        field.value = chars.into_iter().collect();
+                        field.cursor_pos += 1;
                     }
+                    error_msg = None;
                 }
                 _ => {}
             }
         }
-    };
-
-    result
+    }
 }
 
-fn validate_and_build(fields: &[FormField], existing: Option<&ServerConnection>) -> Result<ServerConnection, String> {
+fn validate_and_build(
+    fields: &[FormField],
+    existing: Option<&ServerConnection>,
+) -> Result<ServerConnection, String> {
     let nickname = fields[0].value.trim().to_string();
     let host = fields[1].value.trim().to_string();
     let port_str = fields[2].value.trim();
     let username = fields[3].value.trim().to_string();
-    let password = fields[4].value.trim().to_string();
+    let password = fields[4].value.clone();
     let ssh_key = fields[5].value.trim().to_string();
     let group_str = fields[6].value.trim().to_string();
 
@@ -419,9 +454,26 @@ fn validate_and_build(fields: &[FormField], existing: Option<&ServerConnection>)
         .parse()
         .map_err(|_| "Invalid port number (1-65535).".to_string())?;
 
-    let opt_password = if password.is_empty() { None } else { Some(password) };
-    let opt_ssh_key = if ssh_key.is_empty() { None } else { Some(ssh_key) };
-    let opt_group = if group_str.is_empty() { None } else { Some(group_str) };
+    let opt_password = if password.is_empty() {
+        None
+    } else {
+        Some(password)
+    };
+    let password_ref = if opt_password.is_some() {
+        existing.and_then(|e| e.password_ref.clone())
+    } else {
+        None
+    };
+    let opt_ssh_key = if ssh_key.is_empty() {
+        None
+    } else {
+        Some(ssh_key)
+    };
+    let opt_group = if group_str.is_empty() {
+        None
+    } else {
+        Some(group_str)
+    };
 
     let quick_commands = existing.and_then(|e| e.quick_commands.clone());
 
@@ -431,19 +483,22 @@ fn validate_and_build(fields: &[FormField], existing: Option<&ServerConnection>)
         port,
         username,
         password: opt_password,
+        password_ref,
         ssh_key: opt_ssh_key,
         group: opt_group,
         quick_commands,
     })
 }
 
-pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<Option<crate::storage::QuickCommand>, String> {
+pub fn run_qc_wizard(
+    existing: Option<&crate::storage::QuickCommand>,
+) -> Result<Option<crate::storage::QuickCommand>, String> {
     let name_val = existing.map(|e| e.name.clone()).unwrap_or_default();
     let name_len = name_val.chars().count();
     let cmd_val = existing.map(|e| e.command.clone()).unwrap_or_default();
     let cmd_len = cmd_val.chars().count();
 
-    let mut fields = vec![
+    let mut fields = [
         FormField {
             label: "Command Name",
             value: name_val,
@@ -470,16 +525,16 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
     let box_width = 54;
     let box_height = 10;
 
-    let result = loop {
+    loop {
         out.queue(Clear(ClearType::All)).unwrap();
 
         let (cols, rows) = match check_size_or_draw_error(&mut out, box_width, box_height) {
             Ok(Some(sz)) => sz,
             _ => {
-                if let Ok(Event::Key(key)) = event::read() {
-                    if key.code == KeyCode::Esc {
-                        break Ok(None);
-                    }
+                if let Ok(Event::Key(key)) = event::read()
+                    && key.code == KeyCode::Esc
+                {
+                    break Ok(None);
                 }
                 continue;
             }
@@ -488,14 +543,19 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
         let start_x = (cols.saturating_sub(box_width)) / 2;
         let start_y = (rows.saturating_sub(box_height)) / 2;
 
-        let title = if existing.is_some() { " EDIT QUICK COMMAND " } else { " ADD QUICK COMMAND " };
+        let title = if existing.is_some() {
+            " EDIT QUICK COMMAND "
+        } else {
+            " ADD QUICK COMMAND "
+        };
         draw_box(&mut out, start_x, start_y, box_width, box_height, title);
 
         for (i, field) in fields.iter_mut().enumerate() {
             let is_focused = active_idx == i;
             let field_y = start_y + 2 + i as u16 * 2;
 
-            out.queue(crossterm::cursor::MoveTo(start_x + 3, field_y)).unwrap();
+            out.queue(crossterm::cursor::MoveTo(start_x + 3, field_y))
+                .unwrap();
             if is_focused {
                 out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                 out.queue(SetAttribute(Attribute::Bold)).unwrap();
@@ -515,15 +575,21 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
                     print!("[");
                     out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                     let placeholder_text = format!(" {}", field.placeholder);
-                    let truncated_placeholder: String = placeholder_text.chars().take(display_width).collect();
+                    let truncated_placeholder: String =
+                        placeholder_text.chars().take(display_width).collect();
                     print!("{:<width$}", truncated_placeholder, width = display_width);
                     out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                     print!("]");
                 } else {
                     out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                     let placeholder_text = format!(" {}", field.placeholder);
-                    let truncated_placeholder: String = placeholder_text.chars().take(display_width).collect();
-                    print!(" [{:<width$}]", truncated_placeholder, width = display_width);
+                    let truncated_placeholder: String =
+                        placeholder_text.chars().take(display_width).collect();
+                    print!(
+                        " [{:<width$}]",
+                        truncated_placeholder,
+                        width = display_width
+                    );
                 }
             } else {
                 let val_len = field.value.chars().count();
@@ -551,13 +617,21 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
                     out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                     print!("[");
                     out.queue(SetForegroundColor(Color::White)).unwrap();
-                    print!("{:<width$}", val_to_show, width = display_width);
+                    print!(
+                        "{:<width$}",
+                        super::common::safe_display(&val_to_show),
+                        width = display_width
+                    );
                     out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                     print!("]");
                 } else {
                     out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                     print!(" ");
-                    print!("{:<width$}", val_to_show, width = display_width);
+                    print!(
+                        "{:<width$}",
+                        super::common::safe_display(&val_to_show),
+                        width = display_width
+                    );
                     print!(" ");
                 }
             }
@@ -570,18 +644,21 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
             let c_pos = field.cursor_pos.min(val_len);
             let cursor_col = start_x + 24 + (c_pos - field.scroll_offset) as u16;
             let cursor_row = start_y + 2 + active_idx as u16 * 2;
-            out.queue(crossterm::cursor::MoveTo(cursor_col, cursor_row)).unwrap();
+            out.queue(crossterm::cursor::MoveTo(cursor_col, cursor_row))
+                .unwrap();
             out.queue(crossterm::cursor::Show).unwrap();
         } else {
             out.queue(crossterm::cursor::Hide).unwrap();
         }
 
         let btn_y = start_y + box_height - 3;
-        
-        out.queue(crossterm::cursor::MoveTo(start_x + 8, btn_y)).unwrap();
+
+        out.queue(crossterm::cursor::MoveTo(start_x + 8, btn_y))
+            .unwrap();
         if active_idx == 2 {
             out.queue(SetForegroundColor(Color::Black)).unwrap();
-            out.queue(crossterm::style::SetBackgroundColor(Color::Green)).unwrap();
+            out.queue(crossterm::style::SetBackgroundColor(Color::Green))
+                .unwrap();
             out.queue(SetAttribute(Attribute::Bold)).unwrap();
             print!("   SAVE   ");
         } else {
@@ -590,13 +667,16 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
             print!(" [ SAVE ] ");
         }
         out.queue(ResetColor).unwrap();
-        out.queue(crossterm::style::SetBackgroundColor(Color::Reset)).unwrap();
+        out.queue(crossterm::style::SetBackgroundColor(Color::Reset))
+            .unwrap();
         out.queue(SetAttribute(Attribute::Reset)).unwrap();
 
-        out.queue(crossterm::cursor::MoveTo(start_x + box_width - 18, btn_y)).unwrap();
+        out.queue(crossterm::cursor::MoveTo(start_x + box_width - 18, btn_y))
+            .unwrap();
         if active_idx == 3 {
             out.queue(SetForegroundColor(Color::Black)).unwrap();
-            out.queue(crossterm::style::SetBackgroundColor(Color::Red)).unwrap();
+            out.queue(crossterm::style::SetBackgroundColor(Color::Red))
+                .unwrap();
             out.queue(SetAttribute(Attribute::Bold)).unwrap();
             print!("  CANCEL  ");
         } else {
@@ -605,20 +685,23 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
             print!(" [ CANCEL ] ");
         }
         out.queue(ResetColor).unwrap();
-        out.queue(crossterm::style::SetBackgroundColor(Color::Reset)).unwrap();
+        out.queue(crossterm::style::SetBackgroundColor(Color::Reset))
+            .unwrap();
         out.queue(SetAttribute(Attribute::Reset)).unwrap();
 
         if let Some(ref err) = error_msg {
             let err_y = start_y + box_height - 2;
-            let clean_err = format!(" Error: {} ", err);
+            let clean_err = format!(" Error: {} ", super::common::safe_display(err));
             let err_x = start_x + (box_width.saturating_sub(clean_err.chars().count() as u16)) / 2;
             out.queue(crossterm::cursor::MoveTo(err_x, err_y)).unwrap();
             out.queue(SetForegroundColor(Color::Black)).unwrap();
-            out.queue(crossterm::style::SetBackgroundColor(Color::Red)).unwrap();
+            out.queue(crossterm::style::SetBackgroundColor(Color::Red))
+                .unwrap();
             out.queue(SetAttribute(Attribute::Bold)).unwrap();
             print!("{}", clean_err);
             out.queue(ResetColor).unwrap();
-            out.queue(crossterm::style::SetBackgroundColor(Color::Reset)).unwrap();
+            out.queue(crossterm::style::SetBackgroundColor(Color::Reset))
+                .unwrap();
             out.queue(SetAttribute(Attribute::Reset)).unwrap();
         }
 
@@ -667,27 +750,21 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
                         active_idx = 2;
                     }
                 }
-                KeyCode::Home => {
-                    if active_idx < 2 {
-                        fields[active_idx].cursor_pos = 0;
-                    }
+                KeyCode::Home if active_idx < 2 => {
+                    fields[active_idx].cursor_pos = 0;
                 }
-                KeyCode::End => {
-                    if active_idx < 2 {
-                        fields[active_idx].cursor_pos = fields[active_idx].value.chars().count();
-                    }
+                KeyCode::End if active_idx < 2 => {
+                    fields[active_idx].cursor_pos = fields[active_idx].value.chars().count();
                 }
-                KeyCode::Delete => {
-                    if active_idx < 2 {
-                        let field = &mut fields[active_idx];
-                        let char_count = field.value.chars().count();
-                        if field.cursor_pos < char_count {
-                            let mut chars: Vec<char> = field.value.chars().collect();
-                            chars.remove(field.cursor_pos);
-                            field.value = chars.into_iter().collect();
-                        }
-                        error_msg = None;
+                KeyCode::Delete if active_idx < 2 => {
+                    let field = &mut fields[active_idx];
+                    let char_count = field.value.chars().count();
+                    if field.cursor_pos < char_count {
+                        let mut chars: Vec<char> = field.value.chars().collect();
+                        chars.remove(field.cursor_pos);
+                        field.value = chars.into_iter().collect();
                     }
+                    error_msg = None;
                 }
                 KeyCode::Enter => {
                     if active_idx < 2 {
@@ -704,36 +781,30 @@ pub fn run_qc_wizard(existing: Option<&crate::storage::QuickCommand>) -> Result<
                         break Ok(None);
                     }
                 }
-                KeyCode::Backspace => {
-                    if active_idx < 2 {
-                        let field = &mut fields[active_idx];
-                        let char_count = field.value.chars().count();
-                        if field.cursor_pos > 0 && field.cursor_pos <= char_count {
-                            let mut chars: Vec<char> = field.value.chars().collect();
-                            chars.remove(field.cursor_pos - 1);
-                            field.value = chars.into_iter().collect();
-                            field.cursor_pos -= 1;
-                        }
-                        error_msg = None;
+                KeyCode::Backspace if active_idx < 2 => {
+                    let field = &mut fields[active_idx];
+                    let char_count = field.value.chars().count();
+                    if field.cursor_pos > 0 && field.cursor_pos <= char_count {
+                        let mut chars: Vec<char> = field.value.chars().collect();
+                        chars.remove(field.cursor_pos - 1);
+                        field.value = chars.into_iter().collect();
+                        field.cursor_pos -= 1;
                     }
+                    error_msg = None;
                 }
-                KeyCode::Char(c) => {
-                    if active_idx < 2 {
-                        let field = &mut fields[active_idx];
-                        let char_count = field.value.chars().count();
-                        if field.cursor_pos <= char_count {
-                            let mut chars: Vec<char> = field.value.chars().collect();
-                            chars.insert(field.cursor_pos, c);
-                            field.value = chars.into_iter().collect();
-                            field.cursor_pos += 1;
-                        }
-                        error_msg = None;
+                KeyCode::Char(c) if active_idx < 2 => {
+                    let field = &mut fields[active_idx];
+                    let char_count = field.value.chars().count();
+                    if field.cursor_pos <= char_count {
+                        let mut chars: Vec<char> = field.value.chars().collect();
+                        chars.insert(field.cursor_pos, c);
+                        field.value = chars.into_iter().collect();
+                        field.cursor_pos += 1;
                     }
+                    error_msg = None;
                 }
                 _ => {}
             }
         }
-    };
-
-    result
+    }
 }

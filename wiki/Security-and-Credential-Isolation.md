@@ -1,8 +1,10 @@
 # security and credential isolation
 
-termos enforces security at system and process boundaries by avoiding external helper utilities like `sshpass` and eliminating plaintext password exposure in process argument lists. when establishing password-authenticated connections, termos utilizes a native `ssh_askpass` interceptor loop.
+Passwords are stored in the operating system credential store (Linux Secret Service, such as GNOME Keyring or KWallet). The JSON file contains only an opaque UUID reference. Legacy JSON passwords are migrated on read; if the credential store cannot save a password, the migration stops and leaves the original JSON intact. Passwords are not encrypted by Termos itself, and an unlocked keyring or a compromised process running as the same user can access them.
 
-during connection initialization, termos exports `ssh_askpass` environment variables pointing to its own binary executable while staging password payload bytes in a protected environment variable (`termos_askpass_password`). when the native `ssh` client requests user credentials, it invokes the binary callback. termos outputs the staged password string directly to standard output into ssh internal memory and immediately clears environment variables post-handshake, preventing credential leakage in process inspection utilities like `ps` or `/proc`.
+On Unix, password-authenticated SSH uses the native `ssh_askpass` mechanism. Termos writes the password to an unlinked temporary file opened with mode `0600`, then passes its inherited file descriptor and byte length to `ssh` and the askpass callback. The password is not placed in process arguments or environment variables. The descriptor remains accessible to the SSH process tree for the session, so this is protection against routine environment inspection, not a boundary against the same user.
+
+during connection initialization, termos exports `ssh_askpass` variables pointing to its own binary and passes the credential descriptor number and length. when ssh requests credentials, the callback reads the bytes from that descriptor and writes them to standard output. the descriptor remains available to the ssh process tree for the duration of the connection, so this protects against environment and argument inspection but does not isolate credentials from processes running as the same user.
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -20,7 +22,7 @@ during connection initialization, termos exports `ssh_askpass` environment varia
     │                                              │
     │   ┌──────────────────────────────────────┐   │
     │   │ ssh_askpass interceptor loop         │   │
-    │   │ (secure credential injection pipe)   │   │
+    │   │ (inherited anonymous credential file)│   │
     │   └──────────────────────────────────────┘   │
     └──────────────────────────────────────────────┘
 ```
@@ -29,12 +31,15 @@ terminal integrity is protected using an raii guard structure (`terminalguard`).
 
 | operational phase | security control | technical mechanism |
 |---|---|---|
-| credential transport | `ssh_askpass` loop | pipes password via direct stdout stream to native ssh client |
-| process isolation | memory clearing | unsets environment variables immediately after handshake |
+| at-rest credential storage | OS credential store | Secret Service stores the password; JSON has only a UUID reference |
+| credential transport | `ssh_askpass` callback | reads from an unlinked mode-0600 file descriptor |
+| process exposure | no password environment variable | passes descriptor metadata only; same-user process access remains possible |
 | terminal state | `terminalguard` raii | disables raw mode and restores screen buffer on drop |
 | storage security | `0600` permissions | restricts configuration file access strictly to owning user |
 
-configurations are stored locally in standard user configuration directories. file initialization enforces strict `0600` read and write permissions, preventing access from unauthorized local host users. credential payloads remain entirely local and are never transmitted to external endpoints.
+Connection metadata is stored locally in standard user configuration directories. The configuration directory is set to `0700`, and each saved file is created with `0600` permissions. SSH password authentication is disabled on non-Unix platforms rather than falling back to an environment variable.
+
+Release binaries are downloaded only after `gh attestation verify` validates their GitHub provenance for this repository and the pinned release workflow. The release workflow builds tagged source and publishes the Linux x86_64 binary with an attestation. Updates fail closed for releases that lack a matching attestation. This verifies provenance, not that the source code itself is free of vulnerabilities; repository branch and tag protections remain part of the trust model.
 
 ---
 

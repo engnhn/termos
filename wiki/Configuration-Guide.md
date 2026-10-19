@@ -1,6 +1,6 @@
 # configuration guide
 
-termos persists connection profiles and quick commands in a single json configuration file located in the user platform configuration directory `~/.config/termos/connections.json`. the file is created automatically on first save with strict `0600` permissions.
+termos persists connection profiles and quick commands in `~/.config/termos/connections.json`, with `0700` directory and `0600` file permissions. Passwords are stored separately in the Linux Secret Service (such as GNOME Keyring or KWallet); the JSON contains an opaque credential reference rather than the password.
 
 ```json
 [
@@ -9,7 +9,6 @@ termos persists connection profiles and quick commands in a single json configur
     "host": "192.168.1.15",
     "port": 22,
     "username": "root",
-    "password": "sample-password",
     "ssh_key": "/home/user/.ssh/id_ed25519",
     "group": "production",
     "quick_commands": [
@@ -34,12 +33,12 @@ the json schema represents an array of host objects. each field configures speci
 | `host` | string | required | hostname or ip address of the remote server |
 | `port` | integer | required | ssh port number (defaults to 22 if unassigned) |
 | `username` | string | required | remote user account name for authentication |
-| `password` | string | optional | plaintext password payload used by `ssh_askpass` loop |
+| `password` | secret | optional | saved in the system credential store; omitted from the JSON file |
 | `ssh_key` | string | optional | absolute filesystem path to private ssh key file |
 | `group` | string | optional | tag used for filtering hosts in the dashboard view |
 | `quick_commands` | array | optional | list of script objects (`name`, `command`) attached to host |
 
-configuration parameters can be edited interactively through the tui wizard (`e` key on selected host) or modified by editing `connections.json` directly. when editing manually, ensure valid json syntax and verify file permissions remain restricted to user read/write (`chmod 600 ~/.config/termos/connections.json`).
+configuration parameters can be edited interactively through the tui wizard (`e` key on selected host) or modified by editing `connections.json` directly. Legacy JSON passwords are migrated on first read. If the Secret Service is unavailable, Termos reports an error and keeps the original file intact rather than writing a password back to JSON.
 
 ---
 

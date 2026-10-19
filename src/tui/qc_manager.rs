@@ -1,13 +1,13 @@
-use crate::storage::load_connections;
-use super::common::{draw_box, check_size_or_draw_error, TerminalGuard};
+use super::common::{TerminalGuard, check_size_or_draw_error, draw_box};
 use super::wizard::run_qc_wizard;
+use crate::storage::load_connections;
 use crossterm::{
+    QueueableCommand,
     event::{self, Event, KeyCode},
     style::{Attribute, Color, ResetColor, SetAttribute, SetForegroundColor},
     terminal::{Clear, ClearType},
-    QueueableCommand,
 };
-use std::io::{stdout, Write};
+use std::io::{Write, stdout};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum QcMode {
@@ -23,11 +23,12 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
 
     let is_fixed_server = nickname.is_some();
     let mut current_nickname = nickname;
-    
+
     let mut server_selected_idx = 0;
     let mut server_scroll_offset = 0;
-    
+
     let mut qc_selected_idx = 0;
+    let mut qc_scroll_offset = 0;
     let mut qc_confirm_delete = false;
     let mut status_msg: Option<String> = None;
 
@@ -41,7 +42,9 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
         };
 
         let current_conn = if let Some(ref name) = current_nickname {
-            let found = all_conns.iter().find(|c| c.nickname.eq_ignore_ascii_case(name));
+            let found = all_conns
+                .iter()
+                .find(|c| c.nickname.eq_ignore_ascii_case(name));
             if found.is_none() {
                 return Err(format!("Server with nickname '{}' not found.", name));
             }
@@ -55,10 +58,10 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
         let (cols, rows) = match check_size_or_draw_error(&mut out, box_width, box_height) {
             Ok(Some(sz)) => sz,
             _ => {
-                if let Ok(Event::Key(key)) = event::read() {
-                    if key.code == KeyCode::Esc {
-                        break;
-                    }
+                if let Ok(Event::Key(key)) = event::read()
+                    && key.code == KeyCode::Esc
+                {
+                    break;
                 }
                 continue;
             }
@@ -81,18 +84,15 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
 
             if mode == QcMode::Add {
                 drop(_guard);
-                match run_qc_wizard(None) {
-                    Ok(Some(new_qc)) => {
-                        if let Err(e) = crate::storage::add_quick_command(&conn.nickname, new_qc) {
-                            status_msg = Some(format!("Add failed: {}", e));
-                        } else {
-                            status_msg = Some("✔ Command added.".to_string());
-                        }
+                if let Ok(Some(new_qc)) = run_qc_wizard(None) {
+                    if let Err(e) = crate::storage::add_quick_command(&conn.nickname, new_qc) {
+                        status_msg = Some(format!("Add failed: {}", e));
+                    } else {
+                        status_msg = Some("✔ Command added.".to_string());
                     }
-                    _ => {}
                 }
                 _guard = TerminalGuard::create()?;
-                
+
                 if is_fixed_server {
                     break;
                 } else {
@@ -104,7 +104,8 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
             if qcs.is_empty() {
                 let empty_msg = "No quick commands defined.";
                 let x = start_x + box_width.saturating_sub(empty_msg.chars().count() as u16) / 2;
-                out.queue(crossterm::cursor::MoveTo(x, start_y + 4)).unwrap();
+                out.queue(crossterm::cursor::MoveTo(x, start_y + 4))
+                    .unwrap();
                 out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                 print!("{}", empty_msg);
                 out.queue(ResetColor).unwrap();
@@ -113,28 +114,43 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
                     qc_selected_idx = qcs.len() - 1;
                 }
 
-                for qi in 0..5 {
-                    if qi >= qcs.len() {
-                        break;
-                    }
-                    let qc = &qcs[qi];
-                    let row_y = start_y + 2 + qi as u16;
-                    out.queue(crossterm::cursor::MoveTo(start_x + 3, row_y)).unwrap();
+                if qc_selected_idx < qc_scroll_offset {
+                    qc_scroll_offset = qc_selected_idx;
+                } else if qc_selected_idx >= qc_scroll_offset + 5 {
+                    qc_scroll_offset = qc_selected_idx - 4;
+                }
+
+                for (qi, qc) in qcs.iter().enumerate().skip(qc_scroll_offset).take(5) {
+                    let row_y = start_y + 2 + (qi - qc_scroll_offset) as u16;
+                    out.queue(crossterm::cursor::MoveTo(start_x + 3, row_y))
+                        .unwrap();
                     let is_focused = qc_selected_idx == qi;
 
-                    let display_qc = format!("{}: {}", qc.name, qc.command);
-                    let truncated_qc: String = display_qc.chars().take(box_width.saturating_sub(8) as usize).collect();
+                    let display_qc =
+                        super::common::safe_display(&format!("{}: {}", qc.name, qc.command));
+                    let truncated_qc: String = display_qc
+                        .chars()
+                        .take(box_width.saturating_sub(8) as usize)
+                        .collect();
 
                     if is_focused {
                         out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                         out.queue(SetAttribute(Attribute::Bold)).unwrap();
                         print!("▶ ");
                         out.queue(SetForegroundColor(Color::White)).unwrap();
-                        print!("{:<width$}", truncated_qc, width = box_width.saturating_sub(8) as usize);
+                        print!(
+                            "{:<width$}",
+                            truncated_qc,
+                            width = box_width.saturating_sub(8) as usize
+                        );
                     } else {
                         print!("  ");
                         out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                        print!("{:<width$}", truncated_qc, width = box_width.saturating_sub(8) as usize);
+                        print!(
+                            "{:<width$}",
+                            truncated_qc,
+                            width = box_width.saturating_sub(8) as usize
+                        );
                     }
                     out.queue(ResetColor).unwrap();
                     out.queue(SetAttribute(Attribute::Reset)).unwrap();
@@ -142,25 +158,34 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
             }
 
             let div_y = start_y + box_height - 4;
-            
+
             if qc_confirm_delete && !qcs.is_empty() {
                 let target_qc = &qcs[qc_selected_idx];
-                let confirm_line = format!("Delete '{}'? (y/n)", target_qc.name);
-                let confirm_x = start_x + box_width.saturating_sub(confirm_line.chars().count() as u16) / 2;
-                out.queue(crossterm::cursor::MoveTo(confirm_x, div_y + 1)).unwrap();
+                let confirm_line = format!(
+                    "Delete '{}'? (y/n)",
+                    super::common::safe_display(&target_qc.name)
+                );
+                let confirm_x =
+                    start_x + box_width.saturating_sub(confirm_line.chars().count() as u16) / 2;
+                out.queue(crossterm::cursor::MoveTo(confirm_x, div_y + 1))
+                    .unwrap();
                 out.queue(SetForegroundColor(Color::Black)).unwrap();
-                out.queue(crossterm::style::SetBackgroundColor(Color::Red)).unwrap();
+                out.queue(crossterm::style::SetBackgroundColor(Color::Red))
+                    .unwrap();
                 out.queue(SetAttribute(Attribute::Bold)).unwrap();
-                print!(" {} ", confirm_line);
+                print!(" {} ", super::common::safe_display(&confirm_line));
                 out.queue(ResetColor).unwrap();
-                out.queue(crossterm::style::SetBackgroundColor(Color::Reset)).unwrap();
+                out.queue(crossterm::style::SetBackgroundColor(Color::Reset))
+                    .unwrap();
                 out.queue(SetAttribute(Attribute::Reset)).unwrap();
             } else if let Some(ref status) = status_msg {
-                let status_x = start_x + box_width.saturating_sub(status.chars().count() as u16) / 2;
-                out.queue(crossterm::cursor::MoveTo(status_x, div_y + 1)).unwrap();
+                let status_x =
+                    start_x + box_width.saturating_sub(status.chars().count() as u16) / 2;
+                out.queue(crossterm::cursor::MoveTo(status_x, div_y + 1))
+                    .unwrap();
                 out.queue(SetForegroundColor(Color::Green)).unwrap();
                 out.queue(SetAttribute(Attribute::Bold)).unwrap();
-                print!("{}", status);
+                print!("{}", super::common::safe_display(status));
                 out.queue(ResetColor).unwrap();
                 out.queue(SetAttribute(Attribute::Reset)).unwrap();
             } else {
@@ -171,7 +196,8 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
                     _ => "",
                 };
                 let h1_x = start_x + box_width.saturating_sub(help_l1.chars().count() as u16) / 2;
-                out.queue(crossterm::cursor::MoveTo(h1_x, div_y + 1)).unwrap();
+                out.queue(crossterm::cursor::MoveTo(h1_x, div_y + 1))
+                    .unwrap();
                 out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                 print!("{}", help_l1);
                 out.queue(ResetColor).unwrap();
@@ -184,7 +210,10 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
                     match key.code {
                         KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
                             let target_qc = &qcs[qc_selected_idx];
-                            if let Err(e) = crate::storage::delete_quick_command(&conn.nickname, &target_qc.name) {
+                            if let Err(e) = crate::storage::delete_quick_command(
+                                &conn.nickname,
+                                &target_qc.name,
+                            ) {
                                 status_msg = Some(format!("Delete failed: {}", e));
                             } else {
                                 status_msg = Some("✔ Command deleted.".to_string());
@@ -209,56 +238,57 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
                             current_nickname = None;
                         }
                     }
-                    KeyCode::Up => {
-                        if !qcs.is_empty() {
-                            qc_selected_idx = if qc_selected_idx == 0 { qcs.len() - 1 } else { qc_selected_idx - 1 };
-                        }
+                    KeyCode::Up if !qcs.is_empty() => {
+                        qc_selected_idx = if qc_selected_idx == 0 {
+                            qcs.len() - 1
+                        } else {
+                            qc_selected_idx - 1
+                        };
                     }
-                    KeyCode::Down => {
-                        if !qcs.is_empty() {
-                            qc_selected_idx = (qc_selected_idx + 1) % qcs.len();
-                        }
+                    KeyCode::Down if !qcs.is_empty() => {
+                        qc_selected_idx = (qc_selected_idx + 1) % qcs.len();
                     }
-                    KeyCode::Enter => {
-                        if !qcs.is_empty() {
-                            match mode {
-                                QcMode::Delete => {
-                                    qc_confirm_delete = true;
+                    KeyCode::Enter if !qcs.is_empty() => match mode {
+                        QcMode::Delete => {
+                            qc_confirm_delete = true;
+                        }
+                        QcMode::Edit => {
+                            let target_qc = &qcs[qc_selected_idx];
+                            drop(_guard);
+                            if let Ok(Some(updated)) = run_qc_wizard(Some(target_qc)) {
+                                if let Err(e) = crate::storage::edit_quick_command(
+                                    &conn.nickname,
+                                    &target_qc.name,
+                                    Some(updated.name),
+                                    Some(updated.command),
+                                ) {
+                                    status_msg = Some(format!("Edit failed: {}", e));
+                                } else {
+                                    status_msg = Some("✔ Command updated.".to_string());
                                 }
-                                QcMode::Edit => {
-                                    let target_qc = &qcs[qc_selected_idx];
-                                    drop(_guard);
-                                    match run_qc_wizard(Some(target_qc)) {
-                                        Ok(Some(updated)) => {
-                                            if let Err(e) = crate::storage::edit_quick_command(
-                                                &conn.nickname,
-                                                &target_qc.name,
-                                                Some(updated.name),
-                                                Some(updated.command)
-                                            ) {
-                                                status_msg = Some(format!("Edit failed: {}", e));
-                                            } else {
-                                                status_msg = Some("✔ Command updated.".to_string());
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                    _guard = TerminalGuard::create()?;
-                                }
-                                _ => {}
                             }
+                            _guard = TerminalGuard::create()?;
                         }
-                    }
+                        _ => {}
+                    },
                     _ => {}
                 }
             }
         } else {
-            draw_box(&mut out, start_x, start_y, box_width, box_height, " SELECT SERVER FOR QC ");
+            draw_box(
+                &mut out,
+                start_x,
+                start_y,
+                box_width,
+                box_height,
+                " SELECT SERVER FOR QC ",
+            );
 
             if all_conns.is_empty() {
                 let empty_msg = "No servers registered yet.";
                 let x = start_x + box_width.saturating_sub(empty_msg.chars().count() as u16) / 2;
-                out.queue(crossterm::cursor::MoveTo(x, start_y + 5)).unwrap();
+                out.queue(crossterm::cursor::MoveTo(x, start_y + 5))
+                    .unwrap();
                 out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
                 print!("{}", empty_msg);
                 out.queue(ResetColor).unwrap();
@@ -282,21 +312,40 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
                     let is_selected = idx == server_selected_idx;
                     let row_y = start_y + 2 + i as u16;
 
-                    out.queue(crossterm::cursor::MoveTo(start_x + 3, row_y)).unwrap();
+                    out.queue(crossterm::cursor::MoveTo(start_x + 3, row_y))
+                        .unwrap();
 
-                    let display_str = format!("{}{}", conn.group.as_ref().map(|g| format!(" [{}]", g)).unwrap_or_default(), conn.nickname);
-                    let truncated_row: String = display_str.chars().take(box_width.saturating_sub(8) as usize).collect();
+                    let display_str = super::common::safe_display(&format!(
+                        "{}{}",
+                        conn.group
+                            .as_ref()
+                            .map(|g| format!(" [{}]", g))
+                            .unwrap_or_default(),
+                        conn.nickname
+                    ));
+                    let truncated_row: String = display_str
+                        .chars()
+                        .take(box_width.saturating_sub(8) as usize)
+                        .collect();
 
                     if is_selected {
                         out.queue(SetForegroundColor(Color::Cyan)).unwrap();
                         out.queue(SetAttribute(Attribute::Bold)).unwrap();
                         print!("▶ ");
                         out.queue(SetForegroundColor(Color::White)).unwrap();
-                        print!("{:<width$}", truncated_row, width = box_width.saturating_sub(8) as usize);
+                        print!(
+                            "{:<width$}",
+                            truncated_row,
+                            width = box_width.saturating_sub(8) as usize
+                        );
                     } else {
                         print!("  ");
                         out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-                        print!("{:<width$}", truncated_row, width = box_width.saturating_sub(8) as usize);
+                        print!(
+                            "{:<width$}",
+                            truncated_row,
+                            width = box_width.saturating_sub(8) as usize
+                        );
                     }
                     out.queue(ResetColor).unwrap();
                     out.queue(SetAttribute(Attribute::Reset)).unwrap();
@@ -306,7 +355,8 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
             let div_y = start_y + box_height - 4;
             let help_line = "Select server: [Up/Down]  |  Confirm: [Enter]  |  [Esc] Exit";
             let h_x = start_x + box_width.saturating_sub(help_line.chars().count() as u16) / 2;
-            out.queue(crossterm::cursor::MoveTo(h_x, div_y + 1)).unwrap();
+            out.queue(crossterm::cursor::MoveTo(h_x, div_y + 1))
+                .unwrap();
             out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
             print!("{}", help_line);
             out.queue(ResetColor).unwrap();
@@ -318,21 +368,19 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
                     KeyCode::Esc | KeyCode::Char('q') => {
                         break;
                     }
-                    KeyCode::Up => {
-                        if !all_conns.is_empty() {
-                            server_selected_idx = if server_selected_idx == 0 { all_conns.len() - 1 } else { server_selected_idx - 1 };
-                        }
+                    KeyCode::Up if !all_conns.is_empty() => {
+                        server_selected_idx = if server_selected_idx == 0 {
+                            all_conns.len() - 1
+                        } else {
+                            server_selected_idx - 1
+                        };
                     }
-                    KeyCode::Down => {
-                        if !all_conns.is_empty() {
-                            server_selected_idx = (server_selected_idx + 1) % all_conns.len();
-                        }
+                    KeyCode::Down if !all_conns.is_empty() => {
+                        server_selected_idx = (server_selected_idx + 1) % all_conns.len();
                     }
-                    KeyCode::Enter => {
-                        if !all_conns.is_empty() {
-                            current_nickname = Some(all_conns[server_selected_idx].nickname.clone());
-                            qc_selected_idx = 0;
-                        }
+                    KeyCode::Enter if !all_conns.is_empty() => {
+                        current_nickname = Some(all_conns[server_selected_idx].nickname.clone());
+                        qc_selected_idx = 0;
                     }
                     _ => {}
                 }
