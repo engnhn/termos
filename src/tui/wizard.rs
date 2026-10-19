@@ -248,21 +248,15 @@ pub fn run_wizard(existing: Option<&ServerConnection>) -> Result<Option<ServerCo
 
         let div_y = start_y + box_height - 5;
         out.queue(SetForegroundColor(Color::DarkGrey)).unwrap();
-        let help_lines = [
-            "Navigation: [Up/Down/Tab/Shift-Tab] to move between fields",
-            "Shortcuts:  [ESC] to Cancel  |  [Ctrl+S] or button to Save",
-        ];
-        for (i, line) in help_lines.iter().enumerate() {
-            let help_y = div_y + 1 + i as u16;
-            let line_len = line.chars().count() as u16;
-            let help_x = start_x + (box_width - line_len) / 2;
-            out.queue(crossterm::cursor::MoveTo(help_x, help_y))
-                .unwrap();
-            print!("{}", line);
-        }
+        let help_line = "Move: Tab / Up / Down   Save: Ctrl+S   Cancel: Esc";
+        let help_len = help_line.chars().count() as u16;
+        let help_x = start_x + (box_width - help_len) / 2;
+        out.queue(crossterm::cursor::MoveTo(help_x, div_y + 1))
+            .unwrap();
+        print!("{}", help_line);
         out.queue(ResetColor).unwrap();
 
-        let btn_y = start_y + box_height - 4;
+        let btn_y = start_y + box_height - 3;
 
         out.queue(crossterm::cursor::MoveTo(start_x + 12, btn_y))
             .unwrap();

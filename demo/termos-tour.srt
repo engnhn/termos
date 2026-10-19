@@ -1,0 +1,27 @@
+1
+00:00:00,000 --> 00:00:05,000
+Add a host: enter an address and login; key and group are optional.
+
+2
+00:00:05,000 --> 00:00:14,000
+Search saved hosts and filter by group; return to all hosts when needed.
+
+3
+00:00:14,000 --> 00:00:18,000
+Browse saved commands. This demo does not run them.
+
+4
+00:00:18,000 --> 00:00:22,000
+Edit options and review the delete confirmation; this demo declines it.
+
+5
+00:00:22,000 --> 00:00:31,000
+CLI: save a named command, then open its interactive manager.
+
+6
+00:00:31,000 --> 00:00:40,000
+CLI commands and MCP options, including the opt-in remote command flag.
+
+7
+00:00:40,000 --> 00:00:54,640
+MCP over stdio: inspect default tools. No SSH session is opened.
