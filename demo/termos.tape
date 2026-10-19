@@ -5,9 +5,11 @@ Set FontSize 17
 Set TypingSpeed 45ms
 Set Theme "Dracula"
 
-Type "./target/release/termos"
+Hide
+Type "XDG_CONFIG_HOME=__TERMO_DEMO_CONFIG__ ./target/release/termos"
 Enter
 Sleep 1200ms
+Show
 
 Type "/"
 Type "web"
