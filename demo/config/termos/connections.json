@@ -1,0 +1,36 @@
+[
+  {
+    "nickname": "web-01",
+    "host": "192.0.2.10",
+    "port": 22,
+    "username": "deploy",
+    "ssh_key": "/home/you/.ssh/id_ed25519",
+    "group": "production",
+    "quick_commands": [
+      {"name": "disk usage", "command": "df -h"},
+      {"name": "service status", "command": "systemctl status nginx"}
+    ]
+  },
+  {
+    "nickname": "db-01",
+    "host": "192.0.2.20",
+    "port": 2222,
+    "username": "admin",
+    "ssh_key": "/home/you/.ssh/id_ed25519",
+    "group": "production",
+    "quick_commands": [
+      {"name": "disk usage", "command": "df -h"}
+    ]
+  },
+  {
+    "nickname": "stage-01",
+    "host": "192.0.2.30",
+    "port": 22,
+    "username": "deploy",
+    "ssh_key": "/home/you/.ssh/id_ed25519",
+    "group": "staging",
+    "quick_commands": [
+      {"name": "service status", "command": "systemctl status app"}
+    ]
+  }
+]

@@ -14,6 +14,12 @@ An SSH connection manager for Linux, with a keyboard-driven terminal interface a
 
 Save your hosts once, find them in the dashboard, and connect with your system's `ssh` client. Termos can also expose saved hosts and quick commands to an MCP client such as Antigravity.
 
+<p align="center">
+  <img src="./demo/termos-demo.gif" alt="Searching saved hosts, filtering by group, and browsing quick commands in the Termos TUI" width="900" />
+</p>
+
+The demo uses reserved example IP addresses and does not open an SSH connection.
+
 ## What you can do
 
 - Save SSH hosts and organize them with groups.
