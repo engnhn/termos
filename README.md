@@ -80,7 +80,7 @@ termos
 | `termos qc add [nickname]` | add new quick command (interactive tui if flags omitted) |
 | `termos qc edit [nickname]` | edit quick command (interactive tui if flags omitted) |
 | `termos qc delete [nickname]` | delete quick command (interactive tui if flags omitted) |
-| `termos update` | fetch and build latest release from github |
+| `termos update` | download and verify the latest signed release |
 | `termos usage` | open interactive terminal user manual |
 
 ## documentation

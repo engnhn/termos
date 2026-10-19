@@ -4,8 +4,6 @@ Passwords are stored in the operating system credential store (Linux Secret Serv
 
 On Unix, password-authenticated SSH uses the native `ssh_askpass` mechanism. Termos writes the password to an unlinked temporary file opened with mode `0600`, then passes its inherited file descriptor and byte length to `ssh` and the askpass callback. The password is not placed in process arguments or environment variables. The descriptor remains accessible to the SSH process tree for the session, so this is protection against routine environment inspection, not a boundary against the same user.
 
-during connection initialization, termos exports `ssh_askpass` variables pointing to its own binary and passes the credential descriptor number and length. when ssh requests credentials, the callback reads the bytes from that descriptor and writes them to standard output. the descriptor remains available to the ssh process tree for the duration of the connection, so this protects against environment and argument inspection but does not isolate credentials from processes running as the same user.
-
 ```
 ┌────────────────────────────────────────────────────────┐
 │                        termos                          │
@@ -39,7 +37,7 @@ terminal integrity is protected using an raii guard structure (`terminalguard`).
 
 Connection metadata is stored locally in standard user configuration directories. The configuration directory is set to `0700`, and each saved file is created with `0600` permissions. SSH password authentication is disabled on non-Unix platforms rather than falling back to an environment variable.
 
-Release binaries are downloaded only after `gh attestation verify` validates their GitHub provenance for this repository and the pinned release workflow. The release workflow builds tagged source and publishes the Linux x86_64 binary with an attestation. Updates fail closed for releases that lack a matching attestation. This verifies provenance, not that the source code itself is free of vulnerabilities; repository branch and tag protections remain part of the trust model.
+Release binaries are accepted only after `gh attestation verify` validates the binary's provenance for this repository and the pinned release workflow. The release workflow builds tagged source and publishes the Linux x86_64 binary with an artifact attestation. `gh release verify` checks a separate release-level attestation; Termos does not depend on it. Updates fail closed for binaries without a matching artifact attestation. This proves which workflow produced the binary, not that the source is free of vulnerabilities; repository branch and tag protections remain part of the trust model.
 
 ---
 
