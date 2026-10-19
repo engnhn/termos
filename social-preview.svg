@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <rect width="1280" height="640" fill="#171918"/>
+  <rect x="0" y="0" width="12" height="640" fill="#ffc95f"/>
+
+  <g font-family="DejaVu Sans, sans-serif">
+    <text x="92" y="133" fill="#ffc95f" font-size="25" letter-spacing="3">LINUX SSH CONNECTION MANAGER</text>
+    <text x="88" y="263" fill="#f2f2ed" font-size="106" font-weight="700">Termos</text>
+    <text x="94" y="322" fill="#c2c6c2" font-size="29">A keyboard-driven terminal interface</text>
+    <text x="94" y="364" fill="#c2c6c2" font-size="29">with a local MCP server.</text>
+
+    <line x1="94" y1="430" x2="604" y2="430" stroke="#454a46" stroke-width="2"/>
+    <text x="94" y="480" fill="#f2f2ed" font-size="22">SSH hosts  ·  Quick commands</text>
+    <text x="94" y="516" fill="#f2f2ed" font-size="22">MCP over stdio</text>
+
+    <rect x="698" y="116" width="493" height="402" rx="14" fill="#202421" stroke="#454a46" stroke-width="2"/>
+    <path d="M712 116h465a14 14 0 0 1 14 14v42H698v-42a14 14 0 0 1 14-14z" fill="#2a302c"/>
+    <circle cx="728" cy="143" r="6" fill="#ec7568"/>
+    <circle cx="751" cy="143" r="6" fill="#ffc95f"/>
+    <circle cx="774" cy="143" r="6" fill="#91ba82"/>
+    <text x="828" y="151" fill="#aab0aa" font-size="17">termos</text>
+
+    <text x="736" y="212" fill="#ffc95f" font-size="18" letter-spacing="1.5">SAVED HOSTS</text>
+    <text x="736" y="266" fill="#f2f2ed" font-size="25">web-01</text>
+    <text x="1074" y="266" fill="#aab0aa" font-size="18">production</text>
+    <line x1="736" y1="286" x2="1152" y2="286" stroke="#454a46" stroke-width="1"/>
+    <text x="736" y="326" fill="#c2c6c2" font-size="19">deploy@192.0.2.10 : 22</text>
+    <rect x="720" y="359" width="447" height="105" rx="7" fill="#171918"/>
+    <text x="741" y="400" fill="#91ba82" font-size="18">web-01 &gt;</text>
+    <text x="858" y="400" fill="#f2f2ed" font-size="18">df -h</text>
+    <text x="741" y="436" fill="#aab0aa" font-size="16">Filesystem  Size  Used  Avail</text>
+    <text x="736" y="492" fill="#8e958f" font-size="15">ssh · terminal UI · local MCP</text>
+  </g>
+</svg>

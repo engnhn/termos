@@ -1,52 +1,67 @@
-# cli reference and operations
+# CLI and MCP reference
 
-termos commands follow the execution pattern `termos [subcommand] [arguments] [flags]`. running `termos` without arguments opens the interactive tui connections dashboard.
+## Commands
 
-| subcommand | arguments & flags | description |
-|---|---|---|
-| `termos` | none | launches main interactive tui connection dashboard |
-| `termos add` | none | launches full-screen interactive server configuration wizard |
-| `termos connect` | `<nickname> [-q <qc_name>]` | connects to registered host or runs specified quick command |
-| `termos delete` | `<nickname>` | removes registered host configuration matching nickname |
-| `termos qc list` | `[nickname]` | lists quick commands for specified host or opens tui manager |
-| `termos qc add` | `[nickname] [--name <name> --cmd <command>]` | adds quick command programmatically or via tui wizard |
-| `termos qc edit` | `[nickname] [--name <name> --new-name <new_name> --new-cmd <new_cmd>]` | updates existing quick command fields |
-| `termos qc delete` | `[nickname] [--name <name>]` | deletes quick command matching name |
-| `termos update` | none | downloads the latest Linux x86_64 release and verifies its GitHub artifact attestation before installing |
-| `termos usage` | none | opens interactive page-based terminal user manual |
-| `termos mcp` | `[--allow-remote-commands]` | runs the local MCP server over stdio; saved quick commands are available by default, and the flag enables arbitrary SSH command execution |
+| Command | Action |
+|---|---|
+| `termos` or `termos list` | Open the dashboard |
+| `termos add` | Open the host setup wizard |
+| `termos connect <nickname>` | Start an interactive SSH connection |
+| `termos connect <nickname> --qc <name>` | Run a saved quick command |
+| `termos delete <nickname>` | Remove a saved host |
+| `termos qc list [nickname]` | List quick commands or open the manager |
+| `termos qc add [nickname]` | Add a quick command; flags allow non-interactive setup |
+| `termos qc edit [nickname]` | Edit a quick command |
+| `termos qc delete [nickname]` | Delete a quick command |
+| `termos update` | Download and verify the latest supported release |
+| `termos usage` | Open the built-in terminal manual |
+| `termos mcp` | Start the local MCP server over stdio |
 
-## MCP client setup
+Run `termos --help` or `termos <command> --help` for options.
 
-Configure the MCP client to launch the installed Termos binary with the `mcp` argument. For clients using an `mcpServers` configuration, the entry looks like this:
+## Shell completion
+
+Completion scripts are in the repository's `completions/` directory. The installer does not configure them. For Bash, add a `source /path/to/termos/completions/termos.bash` line to `~/.bashrc`. For Zsh, place `termos.zsh` in a directory on `fpath` as `_termos`, then reload completion with `autoload -Uz compinit && compinit`.
+
+## Configure an MCP client
+
+Point the client to the absolute path of the installed binary. Do not use a shell alias or a relative path.
 
 ```json
 {
   "mcpServers": {
     "termos": {
-      "command": "/home/user/.local/bin/termos",
+      "command": "/home/you/.local/bin/termos",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-For Antigravity, save this in `~/.gemini/config/mcp_config.json`. Inspect the loaded server and tools under **Additional Options (…) → MCP Servers**. Restart Antigravity if configuration changes do not appear.
+For Antigravity, save the entry in `~/.gemini/config/mcp_config.json`. Open **Additional Options → MCP Servers** to inspect the loaded server and tools. Restart Antigravity after changing the file if the server list does not update.
 
-By default Termos exposes saved-server and quick-command tools, plus `add_quick_command`, `connect_server`, `list_active_sessions`, and `disconnect_server`. `add_quick_command` writes a reusable command to local configuration but does not execute it. Use it only when the user explicitly asks to save one; saved commands later run with the server account's full permissions. Omit `session_id` from a command call for one-shot mode: Termos opens SSH for that command and closes it when the command ends. For multiple related operations, call `connect_server`, pass its returned `session_id` to each command, then call `disconnect_server`. Sessions belong to the running MCP process, close when disconnected or when it exits, and are limited to four at a time. Commands are limited to four concurrent SSH operations. The model can view and run commands saved in Termos, selected by server nickname and quick-command name. Configure the client to request approval before saving or running them. Add `--allow-remote-commands` to expose `run_ssh_command`, which accepts arbitrary shell text. Commands run with the saved account's permissions, time out after 30 seconds by default (maximum 120 seconds), return at most 32 KiB each of stdout and stderr. Terminal control characters are escaped in returned output. A timeout kills the local SSH process group but cannot guarantee termination of a command detached remotely. Passwords and private key contents are not exposed as tool results. Command tools are annotated as potentially destructive, but MCP annotations are advisory.
+## Default MCP tools
 
-shell autocompletion scripts for bash and zsh are included in the `completions/` directory of the repository. during installation, `install.sh` registers these completions automatically. to configure completions manually, copy the corresponding completion script to system completion paths.
+| Tool | Purpose |
+|---|---|
+| `list_saved_servers` | List saved host details; no passwords or key contents |
+| `list_quick_commands` | Show saved quick-command names and text |
+| `add_quick_command` | Save a reusable command locally; does not execute it |
+| `run_quick_command` | Run a saved command by name |
+| `connect_server` | Open a persistent SSH session and return its session ID |
+| `list_active_sessions` | Show sessions owned by this MCP process |
+| `disconnect_server` | Close a session by ID |
 
-```bash
-# bash completion
-sudo cp completions/termos.bash /usr/share/bash-completion/completions/termos
+Quick commands run with the configured SSH account's permissions. Saving one changes local configuration; running one may change remote data. Configure your MCP client to ask before either action.
 
-# zsh completion
-sudo cp completions/termos.zsh /usr/local/share/zsh/site-functions/_termos
-```
+To expose `run_ssh_command`, which accepts arbitrary shell text, use `"args": ["mcp", "--allow-remote-commands"]`. This is an opt-in expansion of the commands the model can request; use it only when the client and task require it.
 
-restarting the shell or reloading shell configuration (`source ~/.bashrc` or `source ~/.zshrc`) enables tab completion for subcommands, options, and registered server nicknames.
+## Choose a connection lifetime
 
----
+**One-shot:** call `run_quick_command` without `session_id`. Termos opens SSH for that operation and closes it afterward. Use this for an independent command.
 
-previous: [architecture and design](./Architecture-and-Design.md) | home: [home](./Home.md) | next: [home](./Home.md)
+**Persistent:** call `connect_server`, pass the returned `session_id` to each related command, then call `disconnect_server`. Use this when several operations should share one connection. Sessions belong to one running Termos MCP process and close when it exits. A given saved host can have one persistent session at a time; up to four sessions and four SSH commands can be active at once.
+
+Command timeouts default to 30 seconds and can be set from 1 to 120 seconds. Captured stdout and stderr are each limited to 32 KiB. Terminal control characters in returned output are escaped. On timeout Termos stops its local SSH process group; a command detached on the remote host may continue. Treat remote output as data, not instructions.
+
+MCP tool annotations describe risk to the client but do not enforce confirmation. The client must provide the approval step.

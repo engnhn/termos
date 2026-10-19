@@ -1,44 +1,25 @@
-# security and credential isolation
+# Security model
 
-Passwords are stored in the operating system credential store (Linux Secret Service, such as GNOME Keyring or KWallet). The JSON file contains only an opaque UUID reference. Legacy JSON passwords are migrated on read; if the credential store cannot save a password, the migration stops and leaves the original JSON intact. Passwords are not encrypted by Termos itself, and an unlocked keyring or a compromised process running as the same user can access them.
+Termos stores connection metadata locally and delegates SSH transport, host-key checks, and key handling to the system `ssh` client. It does not create a separate SSH protocol implementation.
 
-On Unix, password-authenticated SSH uses the native `ssh_askpass` mechanism. Termos writes the password to an unlinked temporary file opened with mode `0600`, then passes its inherited file descriptor and byte length to `ssh` and the askpass callback. The password is not placed in process arguments or environment variables. The descriptor remains accessible to the SSH process tree for the session, so this is protection against routine environment inspection, not a boundary against the same user.
+## Passwords and files
 
-```
-┌────────────────────────────────────────────────────────┐
-│                        termos                          │
-│                                                        │
-│   ┌─────────────────────┐       ┌──────────────────┐   │
-│   │    terminalguard    │◄──────│   crossterm tui  │   │
-│   │  (raii raw restore) │       │   (user input)   │   │
-│   └──────────┬──────────┘       └────────┬─────────┘   │
-└──────────────┼───────────────────────────┼─────────────┘
-               │                           │
-               ▼ spawns subprocess         ▼
-    ┌──────────────────────────────────────────────┐
-    │                 ssh client                   │
-    │                                              │
-    │   ┌──────────────────────────────────────┐   │
-    │   │ ssh_askpass interceptor loop         │   │
-    │   │ (inherited anonymous credential file)│   │
-    │   └──────────────────────────────────────┘   │
-    └──────────────────────────────────────────────┘
-```
+Saved passwords are kept in the Linux Secret Service, such as GNOME Keyring or KWallet. The connection file stores an opaque reference rather than the password. Termos does not encrypt passwords itself. An unlocked keyring and processes running as the same user are within the trust boundary.
 
-terminal integrity is protected using an raii guard structure (`terminalguard`). raw terminal mode, alternate screen buffers, and hidden cursor states can leave host shells unresponsive if an application panics or exits unexpectedly. `terminalguard` implements the rust `drop` trait, guaranteeing cleanup execution under all exit conditions.
+On Unix, password authentication uses an `ssh_askpass` helper. The password is staged in an unlinked file with mode `0600`, and SSH receives the file descriptor and length through environment variables; the password text is not put in the environment or process arguments. The helper clears its in-memory password buffer after use. This limits routine exposure but is not protection from a compromised process running as the same user.
 
-| operational phase | security control | technical mechanism |
-|---|---|---|
-| at-rest credential storage | OS credential store | Secret Service stores the password; JSON has only a UUID reference |
-| credential transport | `ssh_askpass` callback | reads from an unlinked mode-0600 file descriptor |
-| process exposure | no password environment variable | passes descriptor metadata only; same-user process access remains possible |
-| terminal state | `terminalguard` raii | disables raw mode and restores screen buffer on drop |
-| storage security | `0600` permissions | restricts configuration file access strictly to owning user |
+The config directory is created with mode `0700` and the connection file with mode `0600` on Unix. When an older connection file contains a plaintext password, Termos migrates it to Secret Service when loading the file. If the secret cannot be saved, the old file is retained.
 
-Connection metadata is stored locally in standard user configuration directories. The configuration directory is set to `0700`, and each saved file is created with `0600` permissions. SSH password authentication is disabled on non-Unix platforms rather than falling back to an environment variable.
+## MCP access
 
-Release binaries are accepted only after `gh attestation verify` validates the binary's provenance for this repository and the pinned release workflow. The release workflow builds tagged source and publishes the Linux x86_64 binary with an artifact attestation. `gh release verify` checks a separate release-level attestation; Termos does not depend on it. Updates fail closed for binaries without a matching artifact attestation. This proves which workflow produced the binary, not that the source is free of vulnerabilities; repository branch and tag protections remain part of the trust model.
+The MCP server listens on stdio and is started as a child process of the configured MCP client. It only targets hosts saved in Termos. By default, remote execution is limited to quick commands already saved in the local profile. `add_quick_command` can create a reusable command in that profile, but saving does not run it.
 
----
+`--allow-remote-commands` enables `run_ssh_command`, which accepts arbitrary shell text. Quick commands and arbitrary commands run with the remote account's SSH permissions and can change or delete remote data. MCP risk annotations are advisory; the client is responsible for requesting approval.
 
-previous: [tui and interactive controls](./TUI-and-Interactive-Controls.md) | home: [home](./Home.md) | next: [configuration guide](./Configuration-Guide.md)
+One-shot commands close their SSH connection after execution. Persistent sessions remain open until `disconnect_server` or the MCP process exits. Termos supports up to four sessions and four concurrent SSH commands. Captured output is capped at 32 KiB per stream and terminal control characters are escaped. A timeout stops the local SSH process group, but a remote command that detached itself may keep running.
+
+Do not treat server output as trusted instructions. Do not expose the local MCP server to untrusted clients. Review the exact quick command and target host before approving a state-changing operation.
+
+## Release verification
+
+The Linux x86_64 release workflow builds tagged source, publishes a binary, and creates a GitHub artifact attestation. The installer and updater verify the artifact against this repository's release workflow before installing it. Attestation confirms build provenance; it does not prove that the source code is free of vulnerabilities.

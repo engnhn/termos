@@ -1,17 +1,17 @@
-# termos
+# Termos documentation
 
-termos is a lightweight local ssh connection manager written in rust. it manages saved host configurations, executes interactive ssh sessions using native system binaries, isolates credentials in process memory, and provides terminal keyboard controls for navigation, search, and quick command execution.
+Termos stores SSH connection profiles on your Linux machine and opens connections with the system `ssh` client. Use the terminal dashboard for interactive work, or expose saved hosts and quick commands to an MCP client over stdio.
 
-## index
+## Choose a guide
 
-| page | summary |
+| Guide | What it covers |
 |---|---|
-| [tui and interactive controls](./TUI-and-Interactive-Controls.md) | dashboard navigation, server wizard input manipulation, search-as-you-type filtering, group popovers, and quick command submenus |
-| [security and credential isolation](./Security-and-Credential-Isolation.md) | native `ssh_askpass` credential injection loop, process memory clearing, `terminalguard` raii state recovery, and file permissions |
-| [configuration guide](./Configuration-Guide.md) | json storage layout, field definitions, permission enforcement, quick command structures, and file resolution paths |
-| [architecture and design](./Architecture-and-Design.md) | static binary architecture, native subprocess spawning, tui suspension and resumption lifecycle, and layout viewport bounds |
-| [cli reference and operations](./CLI-Reference-and-Operations.md) | command line execution syntax, subcommand reference table, quick command flags, build workflow, and shell completions |
+| [Getting started](Getting-Started.md) | Install, add a host, make a connection |
+| [TUI controls](TUI-and-Interactive-Controls.md) | Dashboard, search, groups, editing |
+| [CLI and MCP](CLI-Reference-and-Operations.md) | Commands, Antigravity setup, one-shot and persistent sessions |
+| [Configuration](Configuration-Guide.md) | Connection fields and quick commands |
+| [Security](Security-and-Credential-Isolation.md) | Password storage, process boundaries, MCP permissions |
+| [Troubleshooting](Troubleshooting.md) | Common installation, SSH, and MCP issues |
+| [Architecture](Architecture-and-Design.md) | Process model and release verification |
 
----
-
-home: [home](./Home.md) | next: [tui and interactive controls](./TUI-and-Interactive-Controls.md)
+Termos currently publishes a verified release binary for Linux x86_64. See the [repository README](../README.md) for the short install path and current release link.

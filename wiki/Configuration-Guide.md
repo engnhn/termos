@@ -1,45 +1,47 @@
-# configuration guide
+# Configuration and quick commands
 
-termos persists connection profiles and quick commands in `~/.config/termos/connections.json`, with `0700` directory and `0600` file permissions. Passwords are stored separately in the Linux Secret Service (such as GNOME Keyring or KWallet); the JSON contains an opaque credential reference rather than the password.
+Termos keeps connection profiles in `~/.config/termos/connections.json`. The directory is created with mode `0700` and the file with mode `0600` on Unix. You can edit this file directly, but the dashboard and `termos add` wizard are safer ways to avoid malformed JSON.
+
+## Profile format
 
 ```json
 [
   {
-    "nickname": "prod-web-01",
-    "host": "192.168.1.15",
+    "nickname": "web-01",
+    "host": "192.0.2.10",
     "port": 22,
-    "username": "root",
-    "ssh_key": "/home/user/.ssh/id_ed25519",
-    "group": "production",
+    "username": "deploy",
+    "ssh_key": "/home/you/.ssh/id_ed25519",
+    "group": "web",
     "quick_commands": [
-      {
-        "name": "disk usage",
-        "command": "df -h"
-      },
-      {
-        "name": "service status",
-        "command": "systemctl status nginx"
-      }
+      { "name": "disk usage", "command": "df -h" }
     ]
   }
 ]
 ```
 
-the json schema represents an array of host objects. each field configures specific connection parameters used during ssh process instantiation and dashboard rendering.
+| Field | Meaning |
+|---|---|
+| `nickname` | Local name used by the dashboard and CLI |
+| `host` | Hostname or IP address passed to SSH |
+| `port` | SSH port; use `22` when not specified by your server |
+| `username` | Remote account name |
+| `ssh_key` | Optional path to a private key; SSH still handles key use and passphrases |
+| `group` | Optional label for dashboard filtering |
+| `quick_commands` | Optional named shell commands to run on this host |
 
-| field | type | requirement | description |
-|---|---|---|---|
-| `nickname` | string | required | unique identifier used for cli connections and autocomplete |
-| `host` | string | required | hostname or ip address of the remote server |
-| `port` | integer | required | ssh port number (defaults to 22 if unassigned) |
-| `username` | string | required | remote user account name for authentication |
-| `password` | secret | optional | saved in the system credential store; omitted from the JSON file |
-| `ssh_key` | string | optional | absolute filesystem path to private ssh key file |
-| `group` | string | optional | tag used for filtering hosts in the dashboard view |
-| `quick_commands` | array | optional | list of script objects (`name`, `command`) attached to host |
+Passwords are not stored as a profile field in current files. They are saved in the desktop Secret Service and referenced separately. Older files containing a plaintext password are migrated when read. If the Secret Service cannot save the credential, migration stops and the original file is kept.
 
-configuration parameters can be edited interactively through the tui wizard (`e` key on selected host) or modified by editing `connections.json` directly. Legacy JSON passwords are migrated on first read. If the Secret Service is unavailable, Termos reports an error and keeps the original file intact rather than writing a password back to JSON.
+## Quick commands
 
----
+A quick command has a name and command string. Add, list, edit, or delete them with `termos qc`; omit optional details to use the interactive manager.
 
-previous: [security and credential isolation](./Security-and-Credential-Isolation.md) | home: [home](./Home.md) | next: [architecture and design](./Architecture-and-Design.md)
+```bash
+termos qc add web-01 --name "service status" --cmd "systemctl status nginx"
+termos qc list web-01
+termos connect web-01 --qc "service status"
+```
+
+Commands execute remotely as the configured SSH user. A saved command can modify or remove remote data. Review it before use, especially when an MCP client can invoke it.
+
+See [CLI and MCP](CLI-Reference-and-Operations.md) for the complete command list and MCP behavior.
