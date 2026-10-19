@@ -26,17 +26,13 @@ jobs:
           git fetch origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
 
-      - name: Check formatting
-        run: cargo fmt --check
+      - name: Require tag to match Cargo package version
+        run: |
+          version="$(cargo metadata --no-deps --locked --format-version 1 | python3 -c 'import json, sys; print(next(package["version"] for package in json.load(sys.stdin)["packages"] if package["name"] == "termos"))')"
+          test "$GITHUB_REF_NAME" = "v$version"
 
-      - name: Run Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
-
-      - name: Run test suite
-        run: cargo test --locked
-
-      - name: Build release binary
-        run: cargo build --locked --release
+      - name: Check and build release
+        run: make release
 
       - name: Package release asset
         run: cp target/release/termos termos-linux-x86_64

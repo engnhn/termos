@@ -87,6 +87,16 @@ termos
 
 detailed documentation is in the `wiki/` directory.
 
+## development
+
+Run the same format, lint, and test checks used for pull requests with:
+
+```bash
+make check
+```
+
+Build an optimized release binary after those checks pass with `make release`. Release tags use the `v` prefix and must match the version in `Cargo.toml`; pushing a matching tag starts the signed Linux release workflow.
+
 ## license
 
 [mit](./LICENSE)
