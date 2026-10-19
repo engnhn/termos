@@ -84,12 +84,21 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
 
             if mode == QcMode::Add {
                 drop(_guard);
-                if let Ok(Some(new_qc)) = run_qc_wizard(None) {
-                    if let Err(e) = crate::storage::add_quick_command(&conn.nickname, new_qc) {
-                        status_msg = Some(format!("Add failed: {}", e));
-                    } else {
-                        status_msg = Some("✔ Command added.".to_string());
+                match run_qc_wizard(None) {
+                    Ok(Some(new_qc)) => {
+                        if let Err(error) =
+                            crate::storage::add_quick_command(&conn.nickname, new_qc)
+                        {
+                            if is_fixed_server {
+                                return Err(format!("Add failed: {error}"));
+                            }
+                            status_msg = Some(format!("Add failed: {error}"));
+                        } else {
+                            status_msg = Some("✔ Command added.".to_string());
+                        }
                     }
+                    Ok(None) => {}
+                    Err(error) => return Err(format!("Add failed: {error}")),
                 }
                 _guard = TerminalGuard::create()?;
 
@@ -255,17 +264,21 @@ pub fn run_qc_manager(nickname: Option<String>, mode: QcMode) -> Result<(), Stri
                         QcMode::Edit => {
                             let target_qc = &qcs[qc_selected_idx];
                             drop(_guard);
-                            if let Ok(Some(updated)) = run_qc_wizard(Some(target_qc)) {
-                                if let Err(e) = crate::storage::edit_quick_command(
-                                    &conn.nickname,
-                                    &target_qc.name,
-                                    Some(updated.name),
-                                    Some(updated.command),
-                                ) {
-                                    status_msg = Some(format!("Edit failed: {}", e));
-                                } else {
-                                    status_msg = Some("✔ Command updated.".to_string());
+                            match run_qc_wizard(Some(target_qc)) {
+                                Ok(Some(updated)) => {
+                                    if let Err(error) = crate::storage::edit_quick_command(
+                                        &conn.nickname,
+                                        &target_qc.name,
+                                        Some(updated.name),
+                                        Some(updated.command),
+                                    ) {
+                                        status_msg = Some(format!("Edit failed: {error}"));
+                                    } else {
+                                        status_msg = Some("✔ Command updated.".to_string());
+                                    }
                                 }
+                                Ok(None) => {}
+                                Err(error) => status_msg = Some(format!("Edit failed: {error}")),
                             }
                             _guard = TerminalGuard::create()?;
                         }

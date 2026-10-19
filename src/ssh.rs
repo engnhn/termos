@@ -1,8 +1,35 @@
 use crate::storage::ServerConnection;
 use std::io::{self, Write};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::Duration;
+
+static ACTIVE_MCP_SSH_COMMANDS: AtomicUsize = AtomicUsize::new(0);
+const MAX_ACTIVE_MCP_SSH_COMMANDS: usize = 4;
+
+pub struct McpSshCommandGuard;
+
+impl McpSshCommandGuard {
+    pub fn acquire() -> Result<Self, String> {
+        ACTIVE_MCP_SSH_COMMANDS
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                (active < MAX_ACTIVE_MCP_SSH_COMMANDS).then_some(active + 1)
+            })
+            .map(|_| Self)
+            .map_err(|_| {
+                format!(
+                    "At most {MAX_ACTIVE_MCP_SSH_COMMANDS} MCP SSH commands may run concurrently"
+                )
+            })
+    }
+}
+
+impl Drop for McpSshCommandGuard {
+    fn drop(&mut self) {
+        ACTIVE_MCP_SSH_COMMANDS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 #[cfg(unix)]
 fn configure_askpass(
@@ -12,6 +39,7 @@ fn configure_askpass(
 ) -> Result<Option<std::fs::File>, String> {
     use std::os::fd::AsRawFd;
     use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::process::CommandExt;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
@@ -52,12 +80,17 @@ fn configure_askpass(
 
     let fd = file.as_raw_fd();
     // The file is intentionally inherited by ssh and its askpass callback; it has no filesystem name.
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-    if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) } == -1 {
-        return Err(format!(
-            "Failed to prepare SSH credential descriptor: {}",
-            std::io::Error::last_os_error()
-        ));
+    // Keep close-on-exec in the parent so unrelated concurrent child processes cannot
+    // inherit the credential. Clear it only in the specific SSH child immediately
+    // before exec; SSH needs it for its askpass helper.
+    unsafe {
+        cmd.pre_exec(move || {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags == -1 || libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
     }
 
     cmd.env("SSH_ASKPASS", current_exe)
@@ -83,6 +116,9 @@ fn configure_askpass(
 fn append_target_args(args: &mut Vec<String>, conn: &ServerConnection) -> Result<(), String> {
     let invalid =
         |value: &str| value.chars().any(char::is_whitespace) || value.chars().any(char::is_control);
+    if conn.port == 0 {
+        return Err("Invalid SSH port; use a port between 1 and 65535".to_string());
+    }
     if conn.username.is_empty()
         || conn.username.starts_with('-')
         || conn.username.contains('@')
@@ -256,6 +292,318 @@ pub fn execute_ssh_command(conn: &ServerConnection, cmd_str: &str) -> Result<(),
     }
 }
 
+pub struct CapturedCommand {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+    pub timed_out: bool,
+    pub output_truncated: bool,
+}
+
+/// A foreground SSH ControlMaster owned by one MCP session.
+pub struct SshMaster {
+    child: std::process::Child,
+    dir: std::path::PathBuf,
+    socket: std::path::PathBuf,
+}
+
+impl SshMaster {
+    pub fn socket(&self) -> &std::path::Path {
+        &self.socket
+    }
+}
+
+impl Drop for SshMaster {
+    fn drop(&mut self) {
+        kill_ssh_process_group(&mut self.child);
+        let _ = self.child.wait();
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// Open a persistent SSH ControlMaster. Its socket is private to this process and
+/// the master is terminated when the returned handle is dropped.
+pub fn start_ssh_master(
+    conn: &ServerConnection,
+    timeout_seconds: u64,
+) -> Result<SshMaster, String> {
+    use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    use std::time::Instant;
+
+    if !(1..=120).contains(&timeout_seconds) {
+        return Err("Timeout must be between 1 and 120 seconds".to_string());
+    }
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("Failed to get current executable path: {e}"))?;
+    let dir = std::env::temp_dir().join(format!("termos-{}", uuid::Uuid::new_v4()));
+    let mut builder = std::fs::DirBuilder::new();
+    builder.mode(0o700);
+    builder
+        .create(&dir)
+        .map_err(|e| format!("Failed to create private SSH session directory: {e}"))?;
+    let socket = dir.join("c");
+
+    let mut ssh_args = vec![
+        "-M".to_string(),
+        "-N".to_string(),
+        "-S".to_string(),
+        socket.to_string_lossy().into_owned(),
+        "-o".to_string(),
+        "ControlMaster=yes".to_string(),
+        "-o".to_string(),
+        "ControlPersist=no".to_string(),
+        "-o".to_string(),
+        "ServerAliveInterval=15".to_string(),
+        "-o".to_string(),
+        "ServerAliveCountMax=3".to_string(),
+        "-p".to_string(),
+        conn.port.to_string(),
+    ];
+    if let Some(key) = &conn.ssh_key {
+        ssh_args.extend(["-i".to_string(), key.clone()]);
+    }
+    if let Err(error) = append_target_args(&mut ssh_args, conn) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err(error);
+    }
+
+    let mut cmd = Command::new("ssh");
+    cmd.args(ssh_args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0);
+    let mut secret_file = match conn.password.as_deref() {
+        Some(password) => match configure_askpass(&mut cmd, password, &current_exe) {
+            Ok(file) => file,
+            Err(error) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(error);
+            }
+        },
+        None => None,
+    };
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(format!("Failed to start SSH master: {error}"));
+        }
+    };
+    let deadline = Instant::now() + Duration::from_secs(timeout_seconds);
+    loop {
+        if socket.exists() {
+            // The master has completed authentication. Remove its inherited credential
+            // bytes so a long-lived connection does not retain the password.
+            if let Some(mut file) = secret_file.take() {
+                use std::io::{Seek, SeekFrom};
+                let len = file.metadata().map(|m| m.len()).unwrap_or(0);
+                let zeros = vec![0u8; usize::try_from(len).unwrap_or(0).min(65_536)];
+                let _ = file.seek(SeekFrom::Start(0));
+                let _ = file.write_all(&zeros);
+                let _ = file.set_len(0);
+                let _ = file.sync_all();
+            }
+            return Ok(SshMaster { child, dir, socket });
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(format!(
+                    "SSH master exited before connecting (status {status})"
+                ));
+            }
+            Err(error) => {
+                kill_ssh_process_group(&mut child);
+                let _ = child.wait();
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(format!("Failed checking SSH master: {error}"));
+            }
+            Ok(None) => {}
+        }
+        if Instant::now() >= deadline {
+            kill_ssh_process_group(&mut child);
+            let _ = child.wait();
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err("Timed out waiting for SSH master connection".to_string());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+/// Run a non-interactive SSH command and capture bounded output for MCP clients.
+pub fn execute_ssh_command_captured_via_session(
+    _command_guard: McpSshCommandGuard,
+    conn: &ServerConnection,
+    cmd_str: &str,
+    timeout_seconds: u64,
+    control_socket: Option<&std::path::Path>,
+) -> Result<CapturedCommand, String> {
+    use std::process::Stdio;
+    use std::time::Instant;
+
+    const MAX_OUTPUT_PER_STREAM: usize = 32 * 1024;
+    if cmd_str.trim().is_empty() {
+        return Err("Command must not be empty".to_string());
+    }
+    if cmd_str.len() > 4096 {
+        return Err("Command exceeds the 4096-byte limit".to_string());
+    }
+    if !(1..=120).contains(&timeout_seconds) {
+        return Err("Timeout must be between 1 and 120 seconds".to_string());
+    }
+
+    let current_exe = std::env::current_exe()
+        .map_err(|e| format!("Failed to get current executable path: {e}"))?;
+    let mut ssh_args = vec![
+        "-p".to_string(),
+        conn.port.to_string(),
+        "-o".to_string(),
+        "ServerAliveInterval=15".to_string(),
+        "-o".to_string(),
+        "ServerAliveCountMax=3".to_string(),
+    ];
+    if let Some(socket) = control_socket {
+        ssh_args.extend([
+            "-S".to_string(),
+            socket.to_string_lossy().into_owned(),
+            "-o".to_string(),
+            "ControlMaster=no".to_string(),
+            "-o".to_string(),
+            "BatchMode=yes".to_string(),
+        ]);
+    }
+    if let Some(key) = &conn.ssh_key {
+        ssh_args.push("-i".to_string());
+        ssh_args.push(key.clone());
+    }
+    append_target_args(&mut ssh_args, conn)?;
+    ssh_args.push(cmd_str.to_string());
+
+    let mut cmd = Command::new("ssh");
+    cmd.args(ssh_args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let _secret_file = conn
+        .password
+        .as_deref()
+        .map(|p| configure_askpass(&mut cmd, p, &current_exe))
+        .transpose()?
+        .flatten();
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to start SSH: {e}"))?;
+    let stdout = child.stdout.take().ok_or("Could not capture SSH stdout")?;
+    let stderr = child.stderr.take().ok_or("Could not capture SSH stderr")?;
+    let out_thread = thread::spawn(move || read_bounded(stdout, MAX_OUTPUT_PER_STREAM));
+    let err_thread = thread::spawn(move || read_bounded(stderr, MAX_OUTPUT_PER_STREAM));
+
+    let deadline = Instant::now() + Duration::from_secs(timeout_seconds);
+    let mut timed_out = false;
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| format!("Failed waiting for SSH: {e}"))?
+        {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            timed_out = true;
+            kill_ssh_process_group(&mut child);
+            break child.wait().ok();
+        }
+        thread::sleep(Duration::from_millis(25));
+    };
+
+    let (stdout, stdout_was_truncated) = out_thread
+        .join()
+        .map_err(|_| "SSH stdout reader failed".to_string())??;
+    let (stderr, stderr_was_truncated) = err_thread
+        .join()
+        .map_err(|_| "SSH stderr reader failed".to_string())??;
+    let (stdout, stdout_decode_truncated) = sanitize_output_bounded(&stdout, MAX_OUTPUT_PER_STREAM);
+    let (stderr, stderr_decode_truncated) = sanitize_output_bounded(&stderr, MAX_OUTPUT_PER_STREAM);
+
+    Ok(CapturedCommand {
+        stdout,
+        stderr,
+        exit_code: status.and_then(|s| s.code()),
+        timed_out,
+        output_truncated: stdout_was_truncated
+            || stderr_was_truncated
+            || stdout_decode_truncated
+            || stderr_decode_truncated,
+    })
+}
+
+fn kill_ssh_process_group(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        if let Ok(process_group) = libc::pid_t::try_from(child.id()) {
+            // The SSH process starts in a dedicated group so its local ProxyCommand children
+            // cannot keep captured output pipes open after the command timeout.
+            unsafe {
+                libc::kill(-process_group, libc::SIGKILL);
+            }
+        }
+    }
+    let _ = child.kill();
+}
+
+fn sanitize_output_bounded(bytes: &[u8], limit: usize) -> (String, bool) {
+    let decoded = String::from_utf8_lossy(bytes);
+    let mut output = String::with_capacity(limit.min(decoded.len()));
+    let mut truncated = false;
+    for ch in decoded.chars() {
+        let bidi_override = matches!(
+            ch as u32,
+            0x061C | 0x200E | 0x200F | 0x202A..=0x202E | 0x2066..=0x2069
+        );
+        let mut encoded = [0; 4];
+        let escaped;
+        let text = if (ch.is_control() && !matches!(ch, '\n' | '\t')) || bidi_override {
+            escaped = ch.escape_unicode().to_string();
+            escaped.as_str()
+        } else {
+            ch.encode_utf8(&mut encoded)
+        };
+        if output.len() + text.len() > limit {
+            truncated = true;
+            break;
+        }
+        output.push_str(text);
+    }
+    (output, truncated)
+}
+
+fn read_bounded<R: std::io::Read>(mut reader: R, limit: usize) -> Result<(Vec<u8>, bool), String> {
+    let mut result = Vec::with_capacity(limit);
+    let mut buffer = [0; 4096];
+    let mut truncated = false;
+    loop {
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|e| format!("Failed reading SSH output: {e}"))?;
+        if read == 0 {
+            break;
+        }
+        let room = limit.saturating_sub(result.len());
+        let keep = room.min(read);
+        result.extend_from_slice(&buffer[..keep]);
+        truncated |= keep < read;
+    }
+    Ok((result, truncated))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,5 +638,41 @@ mod tests {
         assert!(
             append_target_args(&mut Vec::new(), &connection("user", "host\nmalicious")).is_err()
         );
+        let mut invalid_port = connection("deploy", "example.org");
+        invalid_port.port = 0;
+        assert!(append_target_args(&mut Vec::new(), &invalid_port).is_err());
+    }
+
+    #[test]
+    fn captured_output_is_limited_after_utf8_replacement() {
+        let (output, truncated) = sanitize_output_bounded(&[0xff; 32], 24);
+        assert!(truncated);
+        assert!(output.len() <= 24);
+        assert!(output.is_char_boundary(output.len()));
+    }
+
+    #[test]
+    fn captured_output_escapes_terminal_and_bidi_controls() {
+        let (output, truncated) = sanitize_output_bounded(b"ok\x1b[2J\n\xE2\x80\xAE", 64);
+        assert_eq!(output, "ok\\u{1b}[2J\n\\u{202e}");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn captured_output_reader_drains_and_caps_stream() {
+        let input = vec![b'x'; 64];
+        let (output, truncated) = read_bounded(input.as_slice(), 16).unwrap();
+        assert_eq!(output, vec![b'x'; 16]);
+        assert!(truncated);
+    }
+
+    #[test]
+    fn mcp_ssh_concurrency_limit_rejects_excess_calls() {
+        let guards = (0..MAX_ACTIVE_MCP_SSH_COMMANDS)
+            .map(|_| McpSshCommandGuard::acquire().unwrap())
+            .collect::<Vec<_>>();
+        assert!(McpSshCommandGuard::acquire().is_err());
+        drop(guards);
+        assert!(McpSshCommandGuard::acquire().is_ok());
     }
 }

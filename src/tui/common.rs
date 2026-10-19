@@ -27,8 +27,10 @@ pub fn safe_display(input: &str) -> String {
 impl TerminalGuard {
     pub fn create() -> Result<Self, String> {
         enable_raw_mode().map_err(|e| format!("Could not enable raw mode: {}", e))?;
-        execute!(stdout(), EnterAlternateScreen, Hide)
-            .map_err(|e| format!("Could not start TUI: {}", e))?;
+        if let Err(error) = execute!(stdout(), EnterAlternateScreen, Hide) {
+            let _ = disable_raw_mode();
+            return Err(format!("Could not start TUI: {}", error));
+        }
         Ok(TerminalGuard)
     }
 }

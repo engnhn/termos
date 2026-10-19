@@ -1,3 +1,4 @@
+mod mcp_server;
 mod ssh;
 mod storage;
 mod tui;
@@ -36,6 +37,12 @@ enum Commands {
     },
     /// Update Termos to the latest version directly from GitHub
     Update,
+    /// Run a local MCP server over stdio
+    Mcp {
+        /// Expose the tool that executes remote shell commands on saved servers
+        #[arg(long)]
+        allow_remote_commands: bool,
+    },
     /// Manage quick commands for a server
     #[command(name = "quick-command", aliases = ["qc"])]
     QuickCommand {
@@ -143,7 +150,10 @@ fn main() {
                     }
                 }
                 Ok(None) => {}
-                Err(e) => eprintln!("\n\x1b[1;31mError:\x1b[0m {}", e),
+                Err(e) => {
+                    eprintln!("\n\x1b[1;31mError:\x1b[0m {}", e);
+                    std::process::exit(1);
+                }
             }
             return;
         }
@@ -155,6 +165,7 @@ fn main() {
                 let nickname = conn.nickname.clone();
                 if let Err(e) = add_connection(conn) {
                     eprintln!("\n\x1b[1;31mError:\x1b[0m {}", e);
+                    std::process::exit(1);
                 } else {
                     println!(
                         "\n\x1b[1;32m✔\x1b[0m Server '{}' saved successfully!",
@@ -167,6 +178,7 @@ fn main() {
             }
             Err(e) => {
                 eprintln!("\n\x1b[1;31mWizard Error:\x1b[0m {}", e);
+                std::process::exit(1);
             }
         },
         Commands::Connect { nickname, qc } => match get_connection(&nickname) {
@@ -226,11 +238,13 @@ fn main() {
             Ok(Some(conn)) => {
                 if let Err(e) = ssh::execute_ssh(&conn) {
                     eprintln!("\x1b[1;31mConnection Failed:\x1b[0m {}", e);
+                    std::process::exit(1);
                 }
             }
             Ok(None) => {}
             Err(e) => {
                 eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                std::process::exit(1);
             }
         },
         Commands::Delete { nickname } => match delete_connection(&nickname) {
@@ -245,9 +259,11 @@ fn main() {
                     "\x1b[1;31mError:\x1b[0m Server with nickname '{}' not found.",
                     tui::safe_display(&nickname)
                 );
+                std::process::exit(1);
             }
             Err(e) => {
                 eprintln!("\x1b[1;31mDatabase Error:\x1b[0m {}", e);
+                std::process::exit(1);
             }
         },
         Commands::Update => {
@@ -264,10 +280,29 @@ fn main() {
                 }
             }
         }
+        Commands::Mcp {
+            allow_remote_commands,
+        } => {
+            let runtime = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    eprintln!("Failed to start MCP runtime: {error}");
+                    std::process::exit(1);
+                }
+            };
+            if let Err(error) = runtime.block_on(mcp_server::run(allow_remote_commands)) {
+                eprintln!("MCP server stopped: {error}");
+                std::process::exit(1);
+            }
+        }
         Commands::QuickCommand { subcommand } => match subcommand {
             QcCommands::List { nickname } => {
                 if let Err(e) = tui::run_qc_manager(nickname, tui::QcMode::List) {
                     eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                    std::process::exit(1);
                 }
             }
             QcCommands::Add {
@@ -283,12 +318,14 @@ fn main() {
                         }
                         Err(e) => {
                             eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                            std::process::exit(1);
                         }
                     }
                 }
                 (nickname, _, _) => {
                     if let Err(e) = tui::run_qc_manager(nickname, tui::QcMode::Add) {
                         eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                        std::process::exit(1);
                     }
                 }
             },
@@ -303,7 +340,7 @@ fn main() {
                         eprintln!(
                             "\x1b[1;31mError:\x1b[0m Provide either --new-name or --new-cmd to edit."
                         );
-                        return;
+                        std::process::exit(2);
                     }
                     match crate::storage::edit_quick_command(&nickname, &name, new_name, new_cmd) {
                         Ok(_) => {
@@ -311,12 +348,14 @@ fn main() {
                         }
                         Err(e) => {
                             eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                            std::process::exit(1);
                         }
                     }
                 }
                 (nickname, _) => {
                     if let Err(e) = tui::run_qc_manager(nickname, tui::QcMode::Edit) {
                         eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                        std::process::exit(1);
                     }
                 }
             },
@@ -328,12 +367,14 @@ fn main() {
                         }
                         Err(e) => {
                             eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                            std::process::exit(1);
                         }
                     }
                 }
                 (nickname, _) => {
                     if let Err(e) = tui::run_qc_manager(nickname, tui::QcMode::Delete) {
                         eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                        std::process::exit(1);
                     }
                 }
             },
@@ -341,6 +382,7 @@ fn main() {
         Commands::Usage => {
             if let Err(e) = tui::run_usage_viewer() {
                 eprintln!("\x1b[1;31mError:\x1b[0m {}", e);
+                std::process::exit(1);
             }
         }
         Commands::_ListNicknames => {

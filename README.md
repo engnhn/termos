@@ -82,6 +82,32 @@ termos
 | `termos qc delete [nickname]` | delete quick command (interactive tui if flags omitted) |
 | `termos update` | download and verify the latest signed release |
 | `termos usage` | open interactive terminal user manual |
+| `termos mcp` | run a local MCP server over stdio |
+
+## MCP integration
+
+Termos can expose saved SSH connections to local MCP clients over stdio. Add a server entry to the MCP client's configuration, using the absolute path to the installed binary:
+
+```json
+{
+  "mcpServers": {
+    "termos": {
+      "command": "/home/user/.local/bin/termos",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+For Antigravity, place the entry in `~/.gemini/config/mcp_config.json`. After saving it, open **Additional Options (…) → MCP Servers** to inspect the server and its tools; restart Antigravity if the server does not appear. Use the installed release binary path in `command`.
+
+By default the server exposes saved-server and quick-command tools, plus `connect_server`, `list_active_sessions`, and `disconnect_server`. `add_quick_command` saves a reusable command to local Termos configuration but does not execute it; only save one when the user explicitly asks, because it can later run with the saved account's full permissions. Omit `session_id` from a command call for a one-shot SSH connection that closes after the command. For several related operations, call `connect_server` once, pass its `session_id` to each command, then call `disconnect_server`. Session IDs live only for that MCP process; sessions close when explicitly disconnected or when the process exits. Termos allows four active sessions and four simultaneous SSH commands. The default execution interface only runs commands previously saved in Termos; the model selects a server and quick-command name, never supplies arbitrary shell text. Quick commands run with the saved account's permissions and may modify remote systems, so configure Antigravity to request approval before command execution. To expose unrestricted `run_ssh_command`, add `--allow-remote-commands` to the MCP server arguments. Both command tools have a 30-second default timeout (1–120 seconds), cap stdout and stderr at 32 KiB each, and escape terminal control characters in returned output. A timeout kills the local SSH process group, though a command detached on the remote host may continue. Command tools are marked as potentially destructive, but MCP annotations are advisory.
+
+To enable remote command execution, change the client entry to:
+
+```json
+"args": ["mcp", "--allow-remote-commands"]
+```
 
 ## documentation
 

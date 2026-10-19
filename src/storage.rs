@@ -11,6 +11,26 @@ pub struct QuickCommand {
     pub command: String,
 }
 
+pub(crate) fn validate_quick_command_fields(name: &str, command: &str) -> Result<(), String> {
+    if name.trim() != name
+        || name.is_empty()
+        || name.len() > 64
+        || name.chars().any(char::is_control)
+    {
+        return Err(
+            "Quick command name must be 1–64 bytes with no surrounding whitespace or control characters"
+                .to_string(),
+        );
+    }
+    if command.trim().is_empty() || command.len() > 4096 || command.contains('\0') {
+        return Err(
+            "Command must be non-empty, at most 4096 bytes, and contain no NUL characters"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ServerConnection {
     pub nickname: String,
@@ -94,7 +114,37 @@ fn get_config_path() -> Result<PathBuf, String> {
     Ok(config_dir.join("connections.json"))
 }
 
+fn lock_connections() -> Result<File, String> {
+    let path = get_config_path()?.with_extension("lock");
+    let mut options = OpenOptions::new();
+    options.write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(path)
+        .map_err(|e| format!("Failed to open connections lock: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
+            return Err(format!(
+                "Failed to lock connections file: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(file)
+}
+
 pub fn load_connections() -> Result<Vec<ServerConnection>, String> {
+    let _lock = lock_connections()?;
+    load_connections_unlocked()
+}
+
+fn load_connections_unlocked() -> Result<Vec<ServerConnection>, String> {
     let path = get_config_path()?;
     if !path.exists() {
         return Ok(Vec::new());
@@ -139,7 +189,7 @@ pub fn load_connections() -> Result<Vec<ServerConnection>, String> {
     Ok(connections)
 }
 
-pub fn save_connections(connections: &[ServerConnection]) -> Result<(), String> {
+fn save_connections(connections: &[ServerConnection]) -> Result<(), String> {
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -211,7 +261,8 @@ pub fn save_connections(connections: &[ServerConnection]) -> Result<(), String> 
 }
 
 pub fn add_connection(conn: ServerConnection) -> Result<(), String> {
-    let mut conns = load_connections()?;
+    let _lock = lock_connections()?;
+    let mut conns = load_connections_unlocked()?;
     if conns
         .iter()
         .any(|c| c.nickname.eq_ignore_ascii_case(&conn.nickname))
@@ -235,7 +286,8 @@ pub fn get_connection(nickname: &str) -> Result<Option<ServerConnection>, String
 }
 
 pub fn delete_connection(nickname: &str) -> Result<bool, String> {
-    let mut conns = load_connections()?;
+    let _lock = lock_connections()?;
+    let mut conns = load_connections_unlocked()?;
     let original_len = conns.len();
     let removed_refs: Vec<String> = conns
         .iter()
@@ -260,7 +312,8 @@ pub fn delete_connection(nickname: &str) -> Result<bool, String> {
 }
 
 pub fn update_connection(old_nickname: &str, updated: ServerConnection) -> Result<bool, String> {
-    let mut conns = load_connections()?;
+    let _lock = lock_connections()?;
+    let mut conns = load_connections_unlocked()?;
     let mut found = false;
     let mut credential_to_remove = None;
 
@@ -305,7 +358,9 @@ pub fn update_connection(old_nickname: &str, updated: ServerConnection) -> Resul
 }
 
 pub fn add_quick_command(nickname: &str, qc: QuickCommand) -> Result<(), String> {
-    let mut conns = load_connections()?;
+    validate_quick_command_fields(&qc.name, &qc.command)?;
+    let _lock = lock_connections()?;
+    let mut conns = load_connections_unlocked()?;
     let mut found = false;
     for conn in conns.iter_mut() {
         if conn.nickname.eq_ignore_ascii_case(nickname) {
@@ -334,7 +389,29 @@ pub fn edit_quick_command(
     new_name: Option<String>,
     new_cmd: Option<String>,
 ) -> Result<(), String> {
-    let mut conns = load_connections()?;
+    if let Some(ref updated_name) = new_name
+        && (updated_name.trim() != updated_name
+            || updated_name.is_empty()
+            || updated_name.len() > 64
+            || updated_name.chars().any(char::is_control))
+    {
+        return Err(
+            "Quick command name must be 1–64 bytes with no surrounding whitespace or control characters"
+                .to_string(),
+        );
+    }
+    if let Some(ref updated_command) = new_cmd
+        && (updated_command.trim().is_empty()
+            || updated_command.len() > 4096
+            || updated_command.contains('\0'))
+    {
+        return Err(
+            "Command must be non-empty, at most 4096 bytes, and contain no NUL characters"
+                .to_string(),
+        );
+    }
+    let _lock = lock_connections()?;
+    let mut conns = load_connections_unlocked()?;
     let mut found_conn = false;
     let mut found_cmd = false;
     for conn in conns.iter_mut() {
@@ -376,7 +453,8 @@ pub fn edit_quick_command(
 }
 
 pub fn delete_quick_command(nickname: &str, name: &str) -> Result<(), String> {
-    let mut conns = load_connections()?;
+    let _lock = lock_connections()?;
+    let mut conns = load_connections_unlocked()?;
     let mut found_conn = false;
     let mut found_cmd = false;
     for conn in conns.iter_mut() {
@@ -446,5 +524,17 @@ mod tests {
     #[test]
     fn credential_references_must_be_uuid_values() {
         assert!(credential_entry("../../connections.json").is_err());
+    }
+
+    #[test]
+    fn quick_command_validation_is_shared_by_all_entry_points() {
+        assert!(validate_quick_command_fields("Disk usage", "df -h").is_ok());
+        assert!(validate_quick_command_fields("", "df -h").is_err());
+        assert!(validate_quick_command_fields("Disk usage ", "df -h").is_err());
+        assert!(validate_quick_command_fields("Disk usage", " \n ").is_err());
+        assert!(validate_quick_command_fields("Disk usage", "x".repeat(4097).as_str()).is_err());
+        assert!(validate_quick_command_fields("x".repeat(65).as_str(), "df -h").is_err());
+        assert!(validate_quick_command_fields("Disk\nusage", "df -h").is_err());
+        assert!(validate_quick_command_fields("Disk usage", "echo\0bad").is_err());
     }
 }

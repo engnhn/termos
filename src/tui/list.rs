@@ -393,6 +393,7 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
         if show_quick_commands
             && let Some(active_conn) = conns.get(selected_idx)
             && let Some(ref cmds) = active_conn.quick_commands
+            && !cmds.is_empty()
         {
             let overlay_w = 46;
             let overlay_h = ((cmds.len() + 4).max(6) as u16).min(box_height - 2);
@@ -497,6 +498,7 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
             if show_quick_commands {
                 if let Some(active_conn) = conns.get(selected_idx)
                     && let Some(ref cmds) = active_conn.quick_commands
+                    && !cmds.is_empty()
                 {
                     match key.code {
                         KeyCode::Esc => {
@@ -575,14 +577,21 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                         KeyCode::Enter => {
                             if manage_server_idx == 0 {
                                 drop(_guard);
-                                if let Ok(Some(updated)) = run_wizard(Some(active_conn)) {
-                                    if let Err(e) = crate::storage::update_connection(
-                                        &active_conn.nickname,
-                                        updated,
-                                    ) {
-                                        status_msg = Some(format!("Edit failed: {}", e));
-                                    } else {
-                                        status_msg = Some("✔ Server changes saved!".to_string());
+                                match run_wizard(Some(active_conn)) {
+                                    Ok(Some(updated)) => {
+                                        if let Err(error) = crate::storage::update_connection(
+                                            &active_conn.nickname,
+                                            updated,
+                                        ) {
+                                            status_msg = Some(format!("Edit failed: {error}"));
+                                        } else {
+                                            status_msg =
+                                                Some("✔ Server changes saved!".to_string());
+                                        }
+                                    }
+                                    Ok(None) => {}
+                                    Err(error) => {
+                                        status_msg = Some(format!("Edit failed: {error}"))
                                     }
                                 }
                                 _guard = TerminalGuard::create()?;
@@ -590,10 +599,13 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                             } else {
                                 show_manage_server = false;
                                 drop(_guard);
-                                let _ = super::qc_manager::run_qc_manager(
+                                if let Err(error) = super::qc_manager::run_qc_manager(
                                     Some(active_conn.nickname.clone()),
                                     super::qc_manager::QcMode::List,
-                                );
+                                ) {
+                                    status_msg =
+                                        Some(format!("Quick command manager failed: {error}"));
+                                }
                                 _guard = TerminalGuard::create()?;
                             }
                         }
@@ -750,7 +762,11 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                 }
                 KeyCode::Char('c') | KeyCode::Char('C') if !conns.is_empty() => {
                     let active_conn = &conns[selected_idx];
-                    if active_conn.quick_commands.is_some() {
+                    if active_conn
+                        .quick_commands
+                        .as_ref()
+                        .is_some_and(|commands| !commands.is_empty())
+                    {
                         quick_command_idx = 0;
                         show_quick_commands = true;
                     } else {
@@ -763,13 +779,17 @@ pub fn run_list_manager() -> Result<Option<ServerConnection>, String> {
                 }
                 KeyCode::Char('a') | KeyCode::Char('A') => {
                     drop(_guard);
-                    if let Ok(Some(new_conn)) = run_wizard(None) {
-                        let name = new_conn.nickname.clone();
-                        if let Err(e) = crate::storage::add_connection(new_conn) {
-                            status_msg = Some(format!("Save failed: {}", e));
-                        } else {
-                            status_msg = Some(format!("✔ Server '{}' saved!", name));
+                    match run_wizard(None) {
+                        Ok(Some(new_conn)) => {
+                            let name = new_conn.nickname.clone();
+                            if let Err(e) = crate::storage::add_connection(new_conn) {
+                                status_msg = Some(format!("Save failed: {}", e));
+                            } else {
+                                status_msg = Some(format!("✔ Server '{}' saved!", name));
+                            }
                         }
+                        Ok(None) => {}
+                        Err(error) => status_msg = Some(format!("Add failed: {error}")),
                     }
                     _guard = TerminalGuard::create()?;
                 }

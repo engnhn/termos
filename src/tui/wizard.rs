@@ -450,9 +450,7 @@ fn validate_and_build(
         return Err("Username cannot be empty.".to_string());
     }
 
-    let port: u16 = port_str
-        .parse()
-        .map_err(|_| "Invalid port number (1-65535).".to_string())?;
+    let port = parse_port(port_str)?;
 
     let opt_password = if password.is_empty() {
         None
@@ -488,6 +486,16 @@ fn validate_and_build(
         group: opt_group,
         quick_commands,
     })
+}
+
+fn parse_port(value: &str) -> Result<u16, String> {
+    let port: u16 = value
+        .parse()
+        .map_err(|_| "Invalid port number (1-65535).".to_string())?;
+    if port == 0 {
+        return Err("Invalid port number (1-65535).".to_string());
+    }
+    Ok(port)
 }
 
 pub fn run_qc_wizard(
@@ -806,5 +814,19 @@ pub fn run_qc_wizard(
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_port;
+
+    #[test]
+    fn port_must_be_in_the_ssh_port_range() {
+        assert!(parse_port("1").is_ok());
+        assert!(parse_port("65535").is_ok());
+        assert!(parse_port("0").is_err());
+        assert!(parse_port("65536").is_err());
+        assert!(parse_port("ssh").is_err());
     }
 }
