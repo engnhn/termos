@@ -12,16 +12,23 @@ pub struct McpSshCommandGuard;
 
 impl McpSshCommandGuard {
     pub fn acquire() -> Result<Self, String> {
-        ACTIVE_MCP_SSH_COMMANDS
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
-                (active < MAX_ACTIVE_MCP_SSH_COMMANDS).then_some(active + 1)
-            })
-            .map(|_| Self)
-            .map_err(|_| {
-                format!(
+        let mut active = ACTIVE_MCP_SSH_COMMANDS.load(Ordering::Acquire);
+        loop {
+            if active >= MAX_ACTIVE_MCP_SSH_COMMANDS {
+                return Err(format!(
                     "At most {MAX_ACTIVE_MCP_SSH_COMMANDS} MCP SSH commands may run concurrently"
-                )
-            })
+                ));
+            }
+            match ACTIVE_MCP_SSH_COMMANDS.compare_exchange_weak(
+                active,
+                active + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return Ok(Self),
+                Err(observed) => active = observed,
+            }
+        }
     }
 }
 
